@@ -630,7 +630,7 @@ function renderThreads() {
   if (rows.length === 0) {
     rows.push(all.length
       ? el('div', { class: 'empty' }, 'No threads in this filter.')
-      : el('div', { class: 'empty' }, el('strong', {}, 'No comments yet'), 'Click a line number in the code to start a thread.'));
+      : el('div', { class: 'empty' }, el('strong', {}, 'No comments yet'), 'Press a on a line, or click its number, to start a thread.'));
   }
   $('#threads').replaceChildren(...rows);
 }
@@ -660,9 +660,11 @@ function renderView() {
   if (!view) {
     content.replaceChildren(state.selected
       ? el('div', { class: 'empty big' }, 'Loading…')
-      : el('div', { class: 'empty big' },
-        el('strong', {}, state.session.diff ? 'Pick a change to review' : 'Pick a file to read'),
-        'Press ', el('kbd', {}, ']'), ' for the next file, or ', el('kbd', {}, '?'), ' for all shortcuts.'));
+      : state.files.length === 0
+        ? el('div', { class: 'empty big' }, el('strong', {}, state.session.diff ? 'No changes' : 'No files'))
+        : el('div', { class: 'empty big' },
+          el('strong', {}, 'No file open'),
+          el('kbd', {}, '}'), ' next file · ', el('kbd', {}, '⌘E'), ' go to file · ', el('kbd', {}, '?'), ' shortcuts'));
     return;
   }
 
@@ -1314,6 +1316,9 @@ document.addEventListener('keydown', event => {
     return;
   }
 
+  // Every plain key is consumed here: an unconsumed key makes macOS beep.
+  // Keys with native behavior worth keeping (arrows, Tab, ...) pass through.
+  if (event.key.length === 1 || event.key === 'Escape') event.preventDefault();
   if (/^[0-9]$/.test(event.key) && !(event.key === '0' && keys.count === '')) {
     keys.count += event.key;
     return;

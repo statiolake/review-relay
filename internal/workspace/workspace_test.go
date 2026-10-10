@@ -127,6 +127,17 @@ func TestHashChangesWhenFileChangesAgain(t *testing.T) {
 	}
 }
 
+func TestEmptyDiffIsAnEmptyList(t *testing.T) {
+	w, err := Open(repo(t), []string{"HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := w.Files()
+	if err != nil || files == nil || len(files) != 0 {
+		t.Fatalf("Files() = %#v, %v; want a non-nil empty list", files, err)
+	}
+}
+
 func TestRangeDiffExcludesUntracked(t *testing.T) {
 	dir := repo(t)
 	write(t, dir, "edit.txt", "z\n")

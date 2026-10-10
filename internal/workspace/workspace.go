@@ -113,6 +113,9 @@ func (w *Workspace) Files() ([]Entry, error) {
 	if err != nil {
 		return nil, err
 	}
+	if entries == nil {
+		entries = []Entry{} // an empty list, never JSON null
+	}
 	slices.SortFunc(entries, func(a, b Entry) int { return strings.Compare(a.Path, b.Path) })
 	return entries, nil
 }
