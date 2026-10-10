@@ -210,6 +210,12 @@ function orderedFiles() {
   return out;
 }
 
+// Every tree row is [gutter (diff only)][indent][twisty][name][extras], so
+// names line up by depth alone; the indent span alone draws the guides.
+function indent(depth) {
+  return el('span', { class: 'indent', style: `width:${depth * 16}px` });
+}
+
 function allFiles(node) {
   return [...node.files.map(entry => entry.file), ...[...node.dirs.values()].flatMap(allFiles)];
 }
@@ -241,9 +247,11 @@ function renderTree() {
       const open = state.dirOpen.get(path) ?? forceOpen;
       const left = diff ? allFiles(child).filter(f => !isReviewed(f)).length : 0;
       rows.push(el('div', {
-        class: 'node dir', style: `--depth:${depth}`,
+        class: 'node dir',
         onclick: () => { state.dirOpen.set(path, !open); renderTree(); },
       },
+      diff && el('span', { class: 'gutter' }),
+      indent(depth),
       el('span', { class: `twisty${open ? ' open' : ''}` }, chevron()),
       el('span', { class: 'name' }, label),
       diff && !open && left > 0 && el('span', { class: 'dir-left', title: `${left} not reviewed` }, String(left))));
@@ -255,23 +263,22 @@ function renderTree() {
       const reviewed = isReviewed(file);
       rows.push(el('div', {
         class: `node file${file.path === state.selected ? ' selected' : ''}${reviewed ? ' reviewed' : ''}`,
-        style: `--depth:${depth}`,
         title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
         onclick: () => openFile(file.path),
       },
-      diff
-        ? el('input', {
-          type: 'checkbox', checked: reviewed, title: reviewed ? 'Reviewed — click to unmark' : 'Mark as reviewed',
-          onclick: event => event.stopPropagation(),
-          onchange: event => setReviewed(file, event.target.checked),
-        })
-        : el('span', { class: 'twisty' }),
-      diff && el('span', { class: `status status-${file.status}` }, file.status),
+      diff && el('span', { class: 'gutter' }, el('input', {
+        type: 'checkbox', checked: reviewed, title: reviewed ? 'Reviewed — click to unmark' : 'Mark as reviewed',
+        onclick: event => event.stopPropagation(),
+        onchange: event => setReviewed(file, event.target.checked),
+      })),
+      indent(depth),
+      el('span', { class: 'twisty' }),
       el('span', { class: 'name' }, name),
       threads.length > 0 && el('span', {
         class: `pip ${waiting ? 'waiting' : 'answered'}`,
         title: `${threads.length} thread(s), ${waiting} waiting for AI`,
-      }, String(threads.length))));
+      }, String(threads.length)),
+      diff && el('span', { class: `status status-${file.status}` }, file.status)));
     }
   };
   walk(buildTree(state.files), '', 0);

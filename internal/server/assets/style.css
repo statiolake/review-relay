@@ -112,18 +112,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ---- File tree ---- */
 #tree { flex: 1; padding: 4px 0 12px; }
-.node {
-  display: flex; align-items: center; gap: 6px; height: 24px;
-  padding: 0 10px 0 calc(6px + var(--depth) * 16px); white-space: nowrap; cursor: pointer; user-select: none;
-}
+.node { display: flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px 0 6px; white-space: nowrap; cursor: pointer; user-select: none; }
 .node:hover { background-color: var(--bg-hover); }
 .node.selected { background-color: var(--bg-selected); }
-/* Indent guides: one vertical line per ancestor, under its chevron. */
-.node {
-  background-image: repeating-linear-gradient(to right, transparent 0 7px, var(--guide) 7px 8px, transparent 8px 16px);
-  background-size: calc(var(--depth) * 16px) 100%;
-  background-position: 6px 0;
-  background-repeat: no-repeat;
+.node .gutter { width: 18px; flex: none; display: grid; place-items: center; }
+/* Indent guides: one vertical line per ancestor, centered under its twisty. */
+.node .indent {
+  flex: none; align-self: stretch; margin-right: -4px;
+  background-image: repeating-linear-gradient(to right, transparent 0 7.5px, var(--guide) 7.5px 8.5px, transparent 8.5px 16px);
 }
 .node .twisty { width: 16px; height: 16px; flex: none; color: var(--fg-2); display: grid; place-items: center; }
 .node .twisty svg { transition: transform 100ms; }
@@ -132,7 +128,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .node.dir .name { color: var(--fg-2); }
 .node .dir-left { color: var(--fg-3); font-size: 12px; font-variant-numeric: tabular-nums; }
 .node.reviewed .name { color: var(--fg-3); }
-.node input[type=checkbox] { margin: 0; flex: none; accent-color: var(--add-fg); }
+.node input[type=checkbox] { margin: 0; accent-color: var(--add-fg); }
 .status { font: 600 11px var(--mono); width: 12px; flex: none; text-align: center; color: var(--fg-3); }
 .status-A { color: var(--add-fg); } .status-D { color: var(--del-fg); }
 .pip { color: var(--fg-3); font-size: 12px; font-variant-numeric: tabular-nums; }
