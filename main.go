@@ -153,7 +153,7 @@ func view(devtools, window bool, diffArgs []string) error {
 	}
 	w.SetTitle(title)
 	w.SetSize(1400, 900, webview.HintNone)
-	matchWindowBackground(w.Window())
+	setupNative(w.Window())
 	w.Navigate(endpoint + "/")
 
 	var fatal error

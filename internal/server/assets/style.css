@@ -123,6 +123,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .node .twisty { width: 16px; height: 16px; flex: none; color: var(--fg-2); display: grid; place-items: center; }
 .node .twisty svg { transition: transform 100ms; }
 .node .twisty.open svg { transform: rotate(90deg); }
+.node .twisty.file-icon { color: var(--fg-3); }
 .node .name { overflow: hidden; text-overflow: ellipsis; flex: 1; }
 .node.dir .name { color: var(--fg-2); }
 .node.reviewed .name { color: var(--fg-3); }
@@ -297,3 +298,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 
 /* ---- Cursor (current line) ---- */
 .row.cursor::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
+
+/* ---- Keyboard choosing ---- */
+.comment.picked { background: var(--bg-selected); }
+.pick-num { min-width: 18px; text-align: center; }
+.dialog button.focused { outline: 2px solid var(--accent); outline-offset: 1px; }

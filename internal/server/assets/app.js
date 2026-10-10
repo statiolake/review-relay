@@ -18,6 +18,7 @@ const state = {
   cursor: null,       // zero-based new-side line of the current line
   visual: null,       // anchor line while in visual line mode
   hiddenThreads: new Set(), // root ids folded away with zc / zm
+  picker: null,       // {action: 'edit'|'delete', rootId, index} while choosing a comment
   drag: null,         // {anchor} while selecting with the mouse
   composer: null,     // {kind: 'new'|'reply'|'edit', line, endLine, rootId, commentId}
   pendingTarget: null,
@@ -76,24 +77,43 @@ function toast(text) {
 }
 
 // Shows a modal and resolves to the value of the chosen button, or null.
+// The keyboard drives it without relying on button focus (see dialogKey):
+// Enter picks the highlighted choice, y the last (confirming) one, Esc / n
+// cancel, arrows and Tab move the highlight. It starts on the last choice.
+let openDialog = null;
+
 function dialog(text, choices) {
   $('#modal-text').textContent = text;
-  const actions = $('#modal .actions');
   return new Promise(resolve => {
+    const options = [{ label: 'Cancel', value: null }, ...choices];
     const done = value => {
+      openDialog = null;
       $('#modal').hidden = true;
       resolve(value);
     };
-    actions.replaceChildren(
-      el('button', { onclick: () => done(null) }, 'Cancel'),
-      ...choices.map(choice => el('button', { class: choice.class, onclick: () => done(choice.value) }, choice.label)));
+    const buttons = options.map(option => el('button', { class: option.class, onclick: () => done(option.value) }, option.label));
+    $('#modal .actions').replaceChildren(...buttons);
+    openDialog = { options, buttons, index: options.length - 1, done };
+    paintDialog();
     $('#modal').hidden = false;
-    // Focus the confirming choice so the keyboard flow is "x, Enter"; Esc cancels.
-    actions.lastChild.focus();
-    $('#modal').onkeydown = event => {
-      if (event.key === 'Escape') { event.preventDefault(); done(null); }
-    };
   });
+}
+
+function paintDialog() {
+  openDialog.buttons.forEach((button, i) => button.classList.toggle('focused', i === openDialog.index));
+}
+
+function dialogKey(event) {
+  const d = openDialog;
+  event.preventDefault();
+  if (event.key === 'Enter') d.done(d.options[d.index].value);
+  else if (event.key === 'y') d.done(d.options.at(-1).value);
+  else if (event.key === 'Escape' || event.key === 'n') d.done(null);
+  else if (['ArrowLeft', 'ArrowRight', 'Tab', 'h', 'l'].includes(event.key)) {
+    const back = event.key === 'ArrowLeft' || event.key === 'h' || (event.key === 'Tab' && event.shiftKey);
+    d.index = (d.index + (back ? -1 : 1) + d.options.length) % d.options.length;
+    paintDialog();
+  }
 }
 
 async function copyText(text, message) {
@@ -288,7 +308,7 @@ function renderTree() {
         onclick: () => openFile(file.path),
       },
       indent(depth),
-      el('span', { class: 'twisty' }),
+      el('span', { class: 'twisty file-icon' }, fileIcon()),
       diff && reviewBox([file]),
       el('span', { class: 'name' }, name),
       threads.length > 0 && el('span', {
@@ -649,7 +669,7 @@ function renderView() {
   const view = state.view;
   const fileComments = view ? state.comments.filter(c => c.path === view.path) : [];
   const key = JSON.stringify([state.selected, view?.version, view?.path, state.layout, fileComments, state.composer,
-    [...state.expanded], state.pendingTarget, search.query, [...state.hiddenThreads]]);
+    [...state.expanded], state.pendingTarget, search.query, [...state.hiddenThreads], state.picker]);
   if (key === state.renderedKey) {
     applySelection();
     return;
@@ -874,6 +894,15 @@ function chevron() {
   return svg;
 }
 
+function fileIcon() {
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 16 16');
+  svg.setAttribute('width', '14');
+  svg.setAttribute('height', '14');
+  svg.innerHTML = '<path d="M4 1.75h5.25L12.25 4.75v9.5H4z M9 1.75v3.25h3.25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>';
+  return svg;
+}
+
 const KIND_CLASS = { '+': 'add', '-': 'del', ' ': '' };
 
 function newNum(line, cls) {
@@ -911,9 +940,12 @@ function renderThread(root) {
   const composer = state.composer;
   return el('div', { class: `thread ${status}`, 'data-root': root.id },
     el('div', { class: 'thread-head' }, lineLabel(root.line, root.endLine)),
-    thread.map(comment => el('div', { class: `comment ${comment.source}` },
+    thread.map((comment, i) => el('div', {
+      class: `comment ${comment.source}${state.picker?.rootId === root.id && state.picker.index === i ? ' picked' : ''}`,
+    },
       el('div', {},
         el('div', { class: 'meta' },
+          state.picker?.rootId === root.id && el('kbd', { class: 'pick-num' }, String(i + 1)),
           el('span', { class: 'author' }, comment.author),
           el('time', { datetime: comment.createdAt, title: new Date(comment.createdAt).toLocaleString() }, formatTime(comment.createdAt)),
           el('span', { class: 'actions' },
@@ -1085,6 +1117,47 @@ function foldThreads(key) {
     else state.hiddenThreads.add(root.id);
   }
   renderView();
+}
+
+// ---- Choosing a comment (x, e) -------------------------------------------------
+// With several comments in the thread on the current line, they get numbers:
+// press one, or move with j / k and press Enter. A lone comment is acted on
+// directly.
+
+function startPicker(action) {
+  const root = threadAtCursor();
+  if (!root) return;
+  state.hiddenThreads.delete(root.id);
+  const thread = threadOf(root.id);
+  if (thread.length === 1) { actOnComment(action, thread[0]); return; }
+  state.picker = { action, rootId: root.id, index: thread.length - 1 };
+  renderView();
+  $(`#content .thread[data-root="${root.id}"]`)?.scrollIntoView({ block: 'nearest' });
+  toast(`${action === 'edit' ? 'Edit' : 'Delete'} which comment? 1–${thread.length}, j / k + Enter, Esc to cancel`);
+}
+
+function pickerKey(event) {
+  const picker = state.picker;
+  const thread = threadOf(picker.rootId);
+  event.preventDefault();
+  let chosen = null;
+  if (/^[1-9]$/.test(event.key) && Number(event.key) <= thread.length) chosen = Number(event.key) - 1;
+  else if (event.key === 'Enter') chosen = picker.index;
+  else if (event.key === 'j' || event.key === 'ArrowDown') picker.index = Math.min(thread.length - 1, picker.index + 1);
+  else if (event.key === 'k' || event.key === 'ArrowUp') picker.index = Math.max(0, picker.index - 1);
+  else if (event.key !== 'Escape') return;
+  state.picker = chosen === null && event.key !== 'Escape' ? { ...picker } : null;
+  renderView();
+  if (chosen !== null) actOnComment(picker.action, thread[chosen]);
+}
+
+async function actOnComment(action, comment) {
+  if (action === 'edit') { startComposer({ kind: 'edit', commentId: comment.id }); return; }
+  const size = threadOf(comment.parentId || comment.id).length;
+  const text = !comment.parentId && size > 1
+    ? `Delete the first comment? It starts the thread, so all ${size} comments go with it.`
+    : `Delete this comment by ${comment.author}?`;
+  if (await dialog(text, [{ label: 'Delete', value: true, class: 'destructive' }])) await removeComment(comment.id);
 }
 
 async function deleteThreadAtCursor() {
@@ -1303,7 +1376,9 @@ document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !$('#help').hidden) { $('#help').hidden = true; return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') { event.preventDefault(); openFinder(); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
-  if (!$('#finder').hidden || typing() || !$('#modal').hidden || event.metaKey || event.altKey) return;
+  if (openDialog) { dialogKey(event); return; }
+  if (state.picker) { pickerKey(event); return; }
+  if (!$('#finder').hidden || typing() || event.metaKey || event.altKey) return;
   if (event.ctrlKey) {
     if (event.key === 'n' || event.key === 'p') {
       event.preventDefault();
@@ -1364,16 +1439,17 @@ document.addEventListener('keydown', event => {
       startComposer({ kind: 'new', line: range.start, endLine: range.end });
       break;
     }
+    case 'd':
+      if (pending === 'd') deleteThreadAtCursor();
+      else { keys.pending = 'd'; keys.pendingAt = Date.now(); }
+      break;
+    case 'x': startPicker('delete'); break;
     case 'r': {
       const root = threadAtCursor();
       if (root) { event.preventDefault(); state.hiddenThreads.delete(root.id); startComposer({ kind: 'reply', rootId: root.id }); }
       break;
     }
-    case 'e': {
-      const root = threadAtCursor();
-      if (root) { event.preventDefault(); state.hiddenThreads.delete(root.id); startComposer({ kind: 'edit', commentId: threadOf(root.id).at(-1).id }); }
-      break;
-    }
+    case 'e': startPicker('edit'); break;
     case 'z':
       keys.pending = 'z';
       keys.pendingAt = Date.now();
@@ -1385,7 +1461,6 @@ document.addEventListener('keydown', event => {
       if (pending !== 'z') break;
       foldThreads(event.key);
       break;
-    case 'x': deleteThreadAtCursor(); break;
     case ' ':
       event.preventDefault(); // not a page scroll
       if (state.session.diff && index >= 0) setReviewed(files[index], !isReviewed(files[index]));
