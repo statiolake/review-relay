@@ -15,6 +15,9 @@ const state = {
   renderedKey: '',    // what #content currently shows
   layout: 'split',
   selection: null,    // {start, end} zero-based new-side lines
+  cursor: null,       // zero-based new-side line of the current line
+  visual: null,       // anchor line while in visual line mode
+  hiddenThreads: new Set(), // root ids folded away with zc / zm
   drag: null,         // {anchor} while selecting with the mouse
   composer: null,     // {kind: 'new'|'reply'|'edit', line, endLine, rootId, commentId}
   pendingTarget: null,
@@ -85,7 +88,11 @@ function dialog(text, choices) {
       el('button', { onclick: () => done(null) }, 'Cancel'),
       ...choices.map(choice => el('button', { class: choice.class, onclick: () => done(choice.value) }, choice.label)));
     $('#modal').hidden = false;
-    actions.firstChild.focus();
+    // Focus the confirming choice so the keyboard flow is "x, Enter"; Esc cancels.
+    actions.lastChild.focus();
+    $('#modal').onkeydown = event => {
+      if (event.key === 'Escape') { event.preventDefault(); done(null); }
+    };
   });
 }
 
@@ -169,6 +176,8 @@ async function openFile(path, target) {
     state.selected = path;
     state.view = null;
     state.selection = null;
+    state.cursor = null;
+    state.visual = null;
     state.composer = null;
     for (let i = path.indexOf('/'); i >= 0; i = path.indexOf('/', i + 1)) state.dirOpen.set(path.slice(0, i), true);
     renderTree();
@@ -210,10 +219,24 @@ function orderedFiles() {
   return out;
 }
 
-// Every tree row is [gutter (diff only)][indent][twisty][name][extras], so
+// Every tree row is [indent][twisty][checkbox (diff only)][name][extras], so
 // names line up by depth alone; the indent span alone draws the guides.
 function indent(depth) {
   return el('span', { class: 'indent', style: `width:${depth * 16}px` });
+}
+
+// A reviewed checkbox for a file, or for a directory covering all its files:
+// checked when all are reviewed, indeterminate when some are.
+function reviewBox(files) {
+  const done = files.filter(isReviewed).length;
+  const box = el('input', {
+    type: 'checkbox', checked: done === files.length,
+    title: files.length === 1 ? 'Reviewed' : `${done} / ${files.length} reviewed`,
+    onclick: event => event.stopPropagation(),
+    onchange: event => setReviewedMany(files, event.target.checked),
+  });
+  box.indeterminate = done > 0 && done < files.length;
+  return box;
 }
 
 function allFiles(node) {
@@ -245,16 +268,14 @@ function renderTree() {
       }
       const path = prefix + label;
       const open = state.dirOpen.get(path) ?? forceOpen;
-      const left = diff ? allFiles(child).filter(f => !isReviewed(f)).length : 0;
       rows.push(el('div', {
         class: 'node dir',
         onclick: () => { state.dirOpen.set(path, !open); renderTree(); },
       },
-      diff && el('span', { class: 'gutter' }),
       indent(depth),
       el('span', { class: `twisty${open ? ' open' : ''}` }, chevron()),
-      el('span', { class: 'name' }, label),
-      diff && !open && left > 0 && el('span', { class: 'dir-left', title: `${left} not reviewed` }, String(left))));
+      diff && reviewBox(allFiles(child)),
+      el('span', { class: 'name' }, label)));
       if (open) walk(child, path + '/', depth + 1);
     }
     for (const { name, file } of node.files) {
@@ -266,13 +287,9 @@ function renderTree() {
         title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
         onclick: () => openFile(file.path),
       },
-      diff && el('span', { class: 'gutter' }, el('input', {
-        type: 'checkbox', checked: reviewed, title: reviewed ? 'Reviewed — click to unmark' : 'Mark as reviewed',
-        onclick: event => event.stopPropagation(),
-        onchange: event => setReviewed(file, event.target.checked),
-      })),
       indent(depth),
       el('span', { class: 'twisty' }),
+      diff && reviewBox([file]),
       el('span', { class: 'name' }, name),
       threads.length > 0 && el('span', {
         class: `pip ${waiting ? 'waiting' : 'answered'}`,
@@ -300,9 +317,15 @@ function renderTree() {
 }
 
 async function setReviewed(file, checked) {
-  await api('PUT', '/ui/reviewed', { path: file.path, hash: checked ? file.hash : '' });
-  if (checked) state.reviewed[file.path] = file.hash;
-  else delete state.reviewed[file.path];
+  await setReviewedMany([file], checked);
+}
+
+async function setReviewedMany(files, checked) {
+  for (const file of files) {
+    await api('PUT', '/ui/reviewed', { path: file.path, hash: checked ? file.hash : '' });
+    if (checked) state.reviewed[file.path] = file.hash;
+    else delete state.reviewed[file.path];
+  }
   renderTree();
   renderHeader();
 }
@@ -388,10 +411,12 @@ function revealCurrentMatch() {
 }
 
 function stepSearch(delta) {
-  if (!search.ranges.length) return;
-  search.current = (search.current + delta + search.ranges.length) % search.ranges.length;
+  if (!search.ranges.length) { if (search.query) toast(`No matches for "${search.query}"`); return; }
+  search.current = ((search.current + delta) % search.ranges.length + search.ranges.length) % search.ranges.length;
   paintSearch();
   revealCurrentMatch();
+  const row = search.ranges[search.current].startContainer.parentElement.closest('.row[data-line]');
+  if (row) setCursor(Number(row.dataset.line), false);
 }
 
 $('#search-input').addEventListener('input', event => {
@@ -399,8 +424,8 @@ $('#search-input').addEventListener('input', event => {
   search.current = 0;
   renderView();
   updateSearch();
-  // Start from the first match below the current scroll position.
-  const top = $('#content').getBoundingClientRect().top;
+  // Start from the first match at or after the current line, like Vim.
+  const top = (rowOfLine(state.cursor) ?? $('#content')).getBoundingClientRect().top;
   const below = search.ranges.findIndex(range => range.getBoundingClientRect().top >= top);
   search.current = Math.max(0, below);
   paintSearch();
@@ -408,7 +433,8 @@ $('#search-input').addEventListener('input', event => {
 });
 $('#search-input').addEventListener('keydown', event => {
   if (event.isComposing) return;
-  if (event.key === 'Enter') { event.preventDefault(); stepSearch(event.shiftKey ? -1 : 1); }
+  // Enter accepts the query and returns to normal mode, where n / p step.
+  if (event.key === 'Enter') { event.preventDefault(); event.target.blur(); }
   if (event.key === 'Escape') { event.preventDefault(); closeSearch(); }
 });
 $('#search-prev').addEventListener('click', () => stepSearch(-1));
@@ -623,7 +649,7 @@ function renderView() {
   const view = state.view;
   const fileComments = view ? state.comments.filter(c => c.path === view.path) : [];
   const key = JSON.stringify([state.selected, view?.version, view?.path, state.layout, fileComments, state.composer,
-    [...state.expanded], state.pendingTarget, search.query]);
+    [...state.expanded], state.pendingTarget, search.query, [...state.hiddenThreads]]);
   if (key === state.renderedKey) {
     applySelection();
     return;
@@ -653,13 +679,14 @@ function renderView() {
   const body = el('div', { class: `code ${mode}`, style: `--num-w:${Math.max(3, String(maxNumber).length) + 3}ch` });
 
   const threadRoots = fileComments.filter(c => !c.parentId);
+  const shown = root => !state.hiddenThreads.has(root.id);
   const byEnd = new Map();
   const outside = [];
   const marks = new Map(); // zero-based line -> {status, start, end}
   for (const root of threadRoots) {
     if (root.endLine >= maxLine) { outside.push(root); continue; }
     if (!byEnd.has(root.endLine)) byEnd.set(root.endLine, []);
-    byEnd.get(root.endLine).push(root);
+    if (shown(root)) byEnd.get(root.endLine).push(root);
     const status = threadState(root.id);
     for (let line = root.line; line <= root.endLine; line++) {
       const mark = marks.get(line) ?? { status, start: false, end: false };
@@ -722,7 +749,7 @@ function renderView() {
     i++;
   }
   if (outside.length) {
-    body.append(el('div', { class: 'outside-head' }, 'Threads outside the current content'), ...outside.map(renderThread));
+    body.append(el('div', { class: 'outside-head' }, 'Threads outside the current content'), ...outside.filter(shown).map(renderThread));
   }
   content.replaceChildren(body);
   applySelection();
@@ -925,32 +952,145 @@ function scrollToPendingTarget() {
   const target = state.pendingTarget;
   if (!target || !state.view) return;
   state.pendingTarget = null;
-  state.selection = { start: target.line, end: target.endLine };
-  applySelection();
-  const row = $(`#content .row[data-line="${target.line}"]`);
+  state.visual = null;
+  state.selection = null;
+  setCursor(target.line, false);
+  const row = rowOfLine(target.line);
   if (!row) return;
   scrollRowIntoView(row, $('#content').clientHeight / 3);
-  row.classList.remove('flash');
-  void row.offsetWidth; // restart the animation
-  row.classList.add('flash');
+  for (let line = target.line; line <= target.endLine; line++) {
+    const flash = rowOfLine(line);
+    if (!flash) continue;
+    flash.classList.remove('flash');
+    void flash.offsetWidth; // restart the animation
+    flash.classList.add('flash');
+  }
 }
 
-// Moves to the next (+1) or previous (-1) block of changed lines.
-function jumpToChange(direction, fromTop = false) {
-  const content = $('#content');
-  const top = content.getBoundingClientRect().top;
-  const starts = [...content.querySelectorAll('.row.change-start')];
-  if (fromTop) {
-    if (starts[0]) scrollRowIntoView(starts[0]);
-    else content.scrollTop = 0;
-    return;
+// ---- Cursor -----------------------------------------------------------------
+// The cursor is a zero-based new-side line, like the lines comments attach to.
+// It only lands on rows that have a new side; deleted-only rows are skipped.
+
+const cursorRows = () => [...document.querySelectorAll('#content .row[data-line]')];
+const rowOfLine = line => $(`#content .row[data-line="${line}"]`);
+
+function setCursor(line, reveal = true) {
+  state.cursor = line;
+  if (state.visual !== null) {
+    state.selection = { start: Math.min(state.visual, line), end: Math.max(state.visual, line) };
   }
-  const position = row => row.getBoundingClientRect().top - top - 96;
-  const next = direction > 0
-    ? starts.find(row => position(row) > 4)
-    : starts.findLast(row => position(row) < -4);
-  if (next) scrollRowIntoView(next);
-  else toast(direction > 0 ? 'No more changes below' : 'No more changes above');
+  applySelection();
+  if (reveal) revealCursor();
+}
+
+function revealCursor() {
+  const row = rowOfLine(state.cursor);
+  if (!row) return;
+  const content = $('#content');
+  const box = row.getBoundingClientRect();
+  const view = content.getBoundingClientRect();
+  const margin = 60;
+  if (box.top < view.top + margin) content.scrollTop -= view.top + margin - box.top;
+  else if (box.bottom > view.bottom - margin) content.scrollTop += box.bottom - view.bottom + margin;
+}
+
+function moveCursor(delta) {
+  const rows = cursorRows();
+  if (!rows.length) return;
+  let i = rows.findIndex(row => Number(row.dataset.line) === state.cursor);
+  if (i < 0) {
+    // No cursor yet: start at the first row on screen.
+    const top = $('#content').getBoundingClientRect().top;
+    i = Math.max(0, rows.findIndex(row => row.getBoundingClientRect().top >= top));
+  } else {
+    i = Math.max(0, Math.min(rows.length - 1, i + delta));
+  }
+  setCursor(Number(rows[i].dataset.line));
+}
+
+function moveCursorTo(position) {
+  const rows = cursorRows();
+  if (!rows.length) return;
+  setCursor(Number(rows[Math.min(position, rows.length - 1)].dataset.line));
+}
+
+// Moves the cursor to the |count|-th next (count > 0) or previous block of
+// changed lines; `fromTop` picks the first block of a freshly opened file.
+function jumpToChange(count, fromTop = false) {
+  const content = $('#content');
+  const all = [...content.querySelectorAll('.row')];
+  const starts = all.filter(row => row.classList.contains('change-start'));
+  let target;
+  if (fromTop) {
+    target = starts[0];
+    if (!target) { content.scrollTop = 0; moveCursorTo(0); return; }
+  } else {
+    const here = all.indexOf(rowOfLine(state.cursor));
+    const top = content.getBoundingClientRect().top + 96;
+    // Without a cursor, measure from the scroll position.
+    const after = here >= 0
+      ? row => all.indexOf(row) > here
+      : row => row.getBoundingClientRect().top > top + 4;
+    const candidates = count > 0 ? starts.filter(after) : starts.filter(row => !after(row) && row !== rowOfLine(state.cursor)).reverse();
+    target = candidates[Math.min(Math.abs(count), candidates.length) - 1];
+    if (!target) { toast(count > 0 ? 'No more changes below' : 'No more changes above'); return; }
+  }
+  scrollRowIntoView(target);
+  // A block may start with deleted lines; the cursor goes to its first new-side line.
+  const landing = all.slice(all.indexOf(target)).find(row => row.dataset.line !== undefined);
+  if (landing) setCursor(Number(landing.dataset.line), false);
+}
+
+// Threads in the panel's current filter, in path and line order.
+function navigableThreads() {
+  return roots()
+    .filter(root => state.threadFilter === 'all' || threadState(root.id) === state.threadFilter)
+    .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
+}
+
+// Jumps to the next (+1) or previous (-1) thread across files, wrapping.
+function jumpToThread(direction) {
+  const threads = navigableThreads();
+  if (!threads.length) { toast(`No ${state.threadFilter === 'all' ? '' : state.threadFilter + ' '}threads`); return; }
+  const path = state.selected ?? '';
+  const line = state.cursor ?? -1;
+  const compare = t => t.path.localeCompare(path) || t.line - line;
+  let target = direction > 0 ? threads.find(t => compare(t) > 0) : threads.findLast(t => compare(t) < 0);
+  if (!target) {
+    target = direction > 0 ? threads[0] : threads.at(-1);
+    toast(direction > 0 ? 'Wrapped to the first thread' : 'Wrapped to the last thread');
+  }
+  state.hiddenThreads.delete(target.id);
+  openFile(target.path, { line: target.line, endLine: target.endLine, commentId: target.id });
+}
+
+// The thread covering the cursor line; the narrowest one if several do.
+function threadAtCursor() {
+  if (state.cursor === null || !state.view) return null;
+  const hits = roots().filter(root => root.path === state.view.path && root.line <= state.cursor && state.cursor <= root.endLine);
+  if (!hits.length) { toast('No thread on this line'); return null; }
+  return hits.sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line))[0];
+}
+
+// zo / zc open or close the thread on the current line; zR / zm all threads.
+function foldThreads(key) {
+  if (key === 'm') roots().forEach(root => state.hiddenThreads.add(root.id));
+  else if (key === 'R') state.hiddenThreads.clear();
+  else {
+    const root = threadAtCursor();
+    if (!root) return;
+    if (key === 'o') state.hiddenThreads.delete(root.id);
+    else state.hiddenThreads.add(root.id);
+  }
+  renderView();
+}
+
+async function deleteThreadAtCursor() {
+  const root = threadAtCursor();
+  if (!root) return;
+  const choice = await dialog(`Delete the thread on ${lineLabel(root.line, root.endLine)} (${threadOf(root.id).length} comment(s))?`,
+    [{ label: 'Delete', value: true, class: 'destructive' }]);
+  if (choice) await removeComment(root.id);
 }
 
 // ---- Line selection ---------------------------------------------------------
@@ -960,6 +1100,7 @@ function applySelection() {
   for (const row of document.querySelectorAll('#content .row[data-line]')) {
     const line = Number(row.dataset.line);
     row.classList.toggle('selected', !!selection && line >= selection.start && line <= selection.end);
+    row.classList.toggle('cursor', line === state.cursor);
   }
 }
 
@@ -970,6 +1111,7 @@ $('#content').addEventListener('mousedown', event => {
   const line = Number(num.dataset.line);
   const anchor = event.shiftKey && state.selection ? state.selection.start : line;
   state.drag = { anchor };
+  state.cursor = line;
   state.selection = { start: Math.min(anchor, line), end: Math.max(anchor, line) };
   applySelection();
 });
@@ -981,6 +1123,13 @@ $('#content').addEventListener('mouseover', event => {
   const line = Number(row.dataset.line);
   state.selection = { start: Math.min(state.drag.anchor, line), end: Math.max(state.drag.anchor, line) };
   applySelection();
+});
+
+// Clicking code moves the cursor there.
+$('#content').addEventListener('click', event => {
+  if (event.target.closest('.num.new, .thread, .composer')) return;
+  const row = event.target.closest('.row[data-line]');
+  if (row) setCursor(Number(row.dataset.line), false);
 });
 
 document.addEventListener('mouseup', () => {
@@ -1033,7 +1182,9 @@ function startComposer(composer) {
 
 function closeComposer() {
   if (state.composer?.kind === 'new') state.selection = null;
+  state.visual = null;
   state.composer = null;
+  composerText.blur();
   renderView();
 }
 
@@ -1051,8 +1202,10 @@ async function submitComposer() {
   }
   // Only discard the text once the server has it.
   composerText.value = '';
+  composerText.blur();
   state.composer = null;
   state.selection = null;
+  state.visual = null;
   await refreshComments();
 }
 
@@ -1140,34 +1293,108 @@ for (const resizer of document.querySelectorAll('.resizer')) {
   });
 }
 
+// Vim-like normal mode. A count prefix repeats motions (5j); two-key
+// commands (gg, dd) must be completed within a short delay.
+const keys = { count: '', pending: null, pendingAt: 0 };
+
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !$('#help').hidden) { $('#help').hidden = true; return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') { event.preventDefault(); openFinder(); return; }
   if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
-  if (!$('#finder').hidden) return;
-  if (typing() || event.metaKey || event.ctrlKey || event.altKey || !$('#modal').hidden) return;
+  if (!$('#finder').hidden || typing() || !$('#modal').hidden || event.metaKey || event.altKey) return;
+  if (event.ctrlKey) {
+    if (event.key === 'n' || event.key === 'p') {
+      event.preventDefault();
+      jumpToThread(event.key === 'n' ? 1 : -1);
+    }
+    if (event.key === 'd' || event.key === 'u') {
+      event.preventDefault();
+      moveCursor((event.key === 'd' ? 1 : -1) * Math.max(1, Math.floor($('#content').clientHeight / 2 / 20)));
+    }
+    return;
+  }
+
+  if (/^[0-9]$/.test(event.key) && !(event.key === '0' && keys.count === '')) {
+    keys.count += event.key;
+    return;
+  }
+  const count = Math.max(1, Number(keys.count || '1'));
+  keys.count = '';
+  const pending = Date.now() - keys.pendingAt < 800 ? keys.pending : null;
+  keys.pending = null;
+
   const files = orderedFiles();
   const index = files.findIndex(f => f.path === state.selected);
   switch (event.key) {
-    case ']':
-    case '[': {
-      const next = files[event.key === ']' ? index + 1 : (index < 0 ? files.length : index) - 1];
+    case 'j': moveCursor(count); break;
+    case 'k': moveCursor(-count); break;
+    case 'G': moveCursorTo(Infinity); break;
+    case 'g':
+      if (pending === 'g') moveCursorTo(0);
+      else { keys.pending = 'g'; keys.pendingAt = Date.now(); }
+      break;
+    case '}':
+    case '{': {
+      const next = files[event.key === '}' ? index + count : (index < 0 ? files.length : index) - count];
       if (next) openFile(next.path);
       break;
     }
-    case 'n': jumpToChange(1); break;
-    case 'p': jumpToChange(-1); break;
-    case 'x':
+    case ']': jumpToChange(count); break;
+    case '[': jumpToChange(-count); break;
+    case 'n': stepSearch(count); break;
+    case 'p':
+    case 'N': stepSearch(-count); break;
+    case 'V':
+      if (state.cursor === null) break;
+      state.visual = state.visual === null ? state.cursor : null;
+      state.selection = state.visual === null ? null : { start: state.cursor, end: state.cursor };
+      applySelection();
+      break;
+    case 'a': {
+      const range = state.selection ?? (state.cursor === null ? null : { start: state.cursor, end: state.cursor });
+      if (!range) break;
+      event.preventDefault(); // keep the key out of the composer
+      state.visual = null;
+      state.selection = range;
+      startComposer({ kind: 'new', line: range.start, endLine: range.end });
+      break;
+    }
+    case 'r': {
+      const root = threadAtCursor();
+      if (root) { event.preventDefault(); state.hiddenThreads.delete(root.id); startComposer({ kind: 'reply', rootId: root.id }); }
+      break;
+    }
+    case 'e': {
+      const root = threadAtCursor();
+      if (root) { event.preventDefault(); state.hiddenThreads.delete(root.id); startComposer({ kind: 'edit', commentId: threadOf(root.id).at(-1).id }); }
+      break;
+    }
+    case 'z':
+      keys.pending = 'z';
+      keys.pendingAt = Date.now();
+      break;
+    case 'o':
+    case 'c':
+    case 'm':
+    case 'R':
+      if (pending !== 'z') break;
+      foldThreads(event.key);
+      break;
+    case 'x': deleteThreadAtCursor(); break;
+    case ' ':
+      event.preventDefault(); // not a page scroll
       if (state.session.diff && index >= 0) setReviewed(files[index], !isReviewed(files[index]));
       break;
-    case 'c':
-      if (state.selection) startComposer({ kind: 'new', line: state.selection.start, endLine: state.selection.end });
-      break;
-    case '/': event.preventDefault(); openFinder(); break;
+    case '/': event.preventDefault(); openSearch(); break;
     case '?': $('#help').hidden = false; break;
     case 'Escape':
-      state.selection = null;
-      applySelection();
+      if (state.selection) {
+        state.visual = null;
+        state.selection = null;
+        applySelection();
+      } else if (!$('#search').hidden) {
+        closeSearch();
+      }
       break;
   }
 });

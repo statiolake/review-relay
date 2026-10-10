@@ -32,8 +32,8 @@
       <span id="file-stat"></span>
       <span class="spacer"></span>
       <div id="change-nav" class="segmented" hidden>
-        <button id="prev-change" title="Previous change (p)">↑</button>
-        <button id="next-change" title="Next change (n)">↓</button>
+        <button id="prev-change" title="Previous change ([)">↑</button>
+        <button id="next-change" title="Next change (])">↓</button>
       </div>
       <div id="layout-toggle" class="segmented" hidden>
         <button data-layout="inline" title="Inline diff">Inline</button>
@@ -48,8 +48,8 @@
       <div id="search" hidden>
         <input id="search-input" type="text" placeholder="Find in file" spellcheck="false" autocomplete="off">
         <span id="search-count"></span>
-        <button id="search-prev" class="ghost square" title="Previous match (Shift+Enter)">↑</button>
-        <button id="search-next" class="ghost square" title="Next match (Enter)">↓</button>
+        <button id="search-prev" class="ghost square" title="Previous match (p)">↑</button>
+        <button id="search-next" class="ghost square" title="Next match (n)">↓</button>
         <button id="search-close" class="ghost square" title="Close (Esc)">×</button>
       </div>
       <div id="content" class="scroll"></div>
@@ -87,14 +87,19 @@
   <div class="dialog">
     <h2>Keyboard</h2>
     <dl class="keys">
-      <dt><kbd>]</kbd> <kbd>[</kbd></dt><dd>Next / previous file</dd>
-      <dt><kbd>n</kbd> <kbd>p</kbd></dt><dd>Next / previous change</dd>
-      <dt><kbd>x</kbd></dt><dd>Toggle reviewed</dd>
-      <dt><kbd>c</kbd></dt><dd>Comment on the selected lines</dd>
-      <dt><kbd>⌘</kbd> <kbd>E</kbd> &nbsp;<kbd>/</kbd></dt><dd>Go to file (fuzzy)</dd>
-      <dt><kbd>⌘</kbd> <kbd>F</kbd></dt><dd>Find in file</dd>
-      <dt><kbd>⌘</kbd> <kbd>Enter</kbd></dt><dd>Submit comment</dd>
-      <dt><kbd>Esc</kbd></dt><dd>Cancel / clear selection</dd>
+      <dt><kbd>j</kbd> <kbd>k</kbd></dt><dd>Move the current line (count: <kbd>5j</kbd>)</dd>
+      <dt><kbd>gg</kbd> <kbd>G</kbd> <kbd>^d</kbd> <kbd>^u</kbd></dt><dd>Top / bottom / half page</dd>
+      <dt><kbd>{</kbd> <kbd>}</kbd></dt><dd>Previous / next file</dd>
+      <dt><kbd>[</kbd> <kbd>]</kbd></dt><dd>Previous / next change</dd>
+      <dt><kbd>^p</kbd> <kbd>^n</kbd></dt><dd>Previous / next thread, across files (follows the panel filter)</dd>
+      <dt><kbd>V</kbd></dt><dd>Select lines</dd>
+      <dt><kbd>a</kbd></dt><dd>Add a thread on the current line or selection</dd>
+      <dt><kbd>r</kbd> <kbd>e</kbd> <kbd>x</kbd></dt><dd>Reply / edit last comment / delete the thread on the current line</dd>
+      <dt><kbd>zo</kbd> <kbd>zc</kbd> <kbd>zR</kbd> <kbd>zm</kbd></dt><dd>Show / hide the thread on the current line; show / hide all</dd>
+      <dt><kbd>Space</kbd></dt><dd>Toggle reviewed for the file</dd>
+      <dt><kbd>/</kbd> <kbd>⌘F</kbd></dt><dd>Find in file; <kbd>Enter</kbd> accepts, then <kbd>n</kbd> / <kbd>p</kbd> step</dd>
+      <dt><kbd>⌘E</kbd></dt><dd>Go to file</dd>
+      <dt><kbd>⌘ Enter</kbd> <kbd>Esc</kbd></dt><dd>Submit / cancel</dd>
     </dl>
     <p class="hint">Click a line number to comment. Drag or Shift-click to select a range.</p>
     <div class="actions"><button id="help-close">Close</button></div>
