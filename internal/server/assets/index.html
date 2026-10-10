@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Review Relay</title>
+<link rel="icon" href="data:,">
+<style>
+  /* Inline so the very first paint already has the right background. */
+  html { background: #ffffff; }
+  @media (prefers-color-scheme: dark) { html { background: #17181b; } }
+</style>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="files">
+    <div class="pane-tools" id="progress-pane" hidden>
+      <div id="progress" title="Files marked reviewed">
+        <div class="meter"><div id="progress-fill"></div></div>
+        <span id="progress-text"></span>
+      </div>
+    </div>
+    <div id="tree" class="scroll"></div>
+  </aside>
+  <div class="resizer" data-side="left"></div>
+
+  <main>
+    <div id="file-header">
+      <div id="crumb"><span id="crumb-dir"></span><span id="crumb-name"></span></div>
+      <span id="file-status" class="chip"></span>
+      <span id="file-stat"></span>
+      <span class="spacer"></span>
+      <div id="change-nav" class="segmented" hidden>
+        <button id="prev-change" title="Previous change (p)">↑</button>
+        <button id="next-change" title="Next change (n)">↓</button>
+      </div>
+      <div id="layout-toggle" class="segmented" hidden>
+        <button data-layout="inline" title="Inline diff">Inline</button>
+        <button data-layout="split" title="Side-by-side diff">Split</button>
+      </div>
+      <button id="help-button" class="ghost square" title="Keyboard shortcuts (?)">?</button>
+      <button id="panel-button" class="ghost square" title="Toggle review panel">
+        <svg viewBox="0 0 16 16" width="16" height="16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor"/><path d="M10 2.5v11" stroke="currentColor"/></svg>
+      </button>
+    </div>
+    <div id="content-wrap">
+      <div id="search" hidden>
+        <input id="search-input" type="text" placeholder="Find in file" spellcheck="false" autocomplete="off">
+        <span id="search-count"></span>
+        <button id="search-prev" class="ghost square" title="Previous match (Shift+Enter)">↑</button>
+        <button id="search-next" class="ghost square" title="Next match (Enter)">↓</button>
+        <button id="search-close" class="ghost square" title="Close (Esc)">×</button>
+      </div>
+      <div id="content" class="scroll"></div>
+    </div>
+  </main>
+
+  <div class="resizer" data-side="right"></div>
+  <aside id="panel">
+    <div id="thread-filter" class="filters">
+      <button data-filter="waiting" class="active">Waiting <span></span></button>
+      <button data-filter="answered">Answered <span></span></button>
+      <button data-filter="all">All <span></span></button>
+    </div>
+    <div id="threads" class="scroll"></div>
+    <textarea id="overall" placeholder="Overall comment: summary, guidance, or context for the agent…"></textarea>
+    <footer id="panel-foot">
+      <button id="copy-instructions" class="ghost" title="Copy instructions that let a coding agent read and answer these comments">Copy agent instructions</button>
+      <span class="spacer"></span>
+      <button id="clear-review" class="ghost danger-text" title="Delete comments">Clear…</button>
+    </footer>
+  </aside>
+</div>
+
+<div id="error" role="alert" hidden>
+  <pre id="error-text"></pre>
+  <button id="error-close" class="ghost square" title="Dismiss">×</button>
+</div>
+<div id="modal" class="overlay" hidden>
+  <div class="dialog">
+    <p id="modal-text"></p>
+    <div class="actions"></div>
+  </div>
+</div>
+<div id="help" class="overlay" hidden>
+  <div class="dialog">
+    <h2>Keyboard</h2>
+    <dl class="keys">
+      <dt><kbd>]</kbd> <kbd>[</kbd></dt><dd>Next / previous file</dd>
+      <dt><kbd>n</kbd> <kbd>p</kbd></dt><dd>Next / previous change</dd>
+      <dt><kbd>x</kbd></dt><dd>Toggle reviewed</dd>
+      <dt><kbd>c</kbd></dt><dd>Comment on the selected lines</dd>
+      <dt><kbd>⌘</kbd> <kbd>E</kbd> &nbsp;<kbd>/</kbd></dt><dd>Go to file (fuzzy)</dd>
+      <dt><kbd>⌘</kbd> <kbd>F</kbd></dt><dd>Find in file</dd>
+      <dt><kbd>⌘</kbd> <kbd>Enter</kbd></dt><dd>Submit comment</dd>
+      <dt><kbd>Esc</kbd></dt><dd>Cancel / clear selection</dd>
+    </dl>
+    <p class="hint">Click a line number to comment. Drag or Shift-click to select a range.</p>
+    <div class="actions"><button id="help-close">Close</button></div>
+  </div>
+</div>
+<div id="finder" class="overlay" hidden>
+  <div class="palette">
+    <input id="finder-input" type="text" placeholder="Go to file" spellcheck="false" autocomplete="off">
+    <div id="finder-list" class="scroll"></div>
+  </div>
+</div>
+<div id="toast" hidden></div>
+<script src="highlight/highlight.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
