@@ -32,25 +32,23 @@
       <span id="file-stat"></span>
       <span class="spacer"></span>
       <div id="change-nav" class="segmented" hidden>
-        <button id="prev-change" title="Previous change ([)">↑</button>
-        <button id="next-change" title="Next change (])">↓</button>
+        <button id="prev-change" class="square" data-icon="up" title="Previous change ([)"></button>
+        <button id="next-change" class="square" data-icon="down" title="Next change (])"></button>
       </div>
       <div id="layout-toggle" class="segmented" hidden>
-        <button data-layout="inline" title="Inline diff">Inline</button>
-        <button data-layout="split" title="Side-by-side diff">Split</button>
+        <button data-layout="inline" class="square" data-icon="inline" title="Inline diff"></button>
+        <button data-layout="split" class="square" data-icon="split" title="Side-by-side diff"></button>
       </div>
-      <button id="help-button" class="ghost square" title="Keyboard shortcuts (?)">?</button>
-      <button id="panel-button" class="ghost square" title="Toggle review panel">
-        <svg viewBox="0 0 16 16" width="16" height="16"><rect x="1.5" y="2.5" width="13" height="11" rx="2" fill="none" stroke="currentColor"/><path d="M10 2.5v11" stroke="currentColor"/></svg>
-      </button>
+      <button id="help-button" class="ghost square" data-icon="help" title="Keyboard shortcuts (?)"></button>
+      <button id="panel-button" class="ghost square" data-icon="panel" title="Toggle review panel"></button>
     </div>
     <div id="content-wrap">
       <div id="search" hidden>
         <input id="search-input" type="text" placeholder="Find in file" spellcheck="false" autocomplete="off">
         <span id="search-count"></span>
-        <button id="search-prev" class="ghost square" title="Previous match (p)">↑</button>
-        <button id="search-next" class="ghost square" title="Next match (n)">↓</button>
-        <button id="search-close" class="ghost square" title="Close (Esc)">×</button>
+        <button id="search-prev" class="ghost square" data-icon="up" title="Previous match (p)"></button>
+        <button id="search-next" class="ghost square" data-icon="down" title="Next match (n)"></button>
+        <button id="search-close" class="ghost square" data-icon="close" title="Close (Esc)"></button>
       </div>
       <div id="content" class="scroll"></div>
     </div>
@@ -66,16 +64,16 @@
     <div id="threads" class="scroll"></div>
     <textarea id="overall" placeholder="Overall comment: summary, guidance, or context for the agent…"></textarea>
     <footer id="panel-foot">
-      <button id="copy-instructions" class="ghost" title="Copy instructions that let a coding agent read and answer these comments">Copy agent instructions</button>
+      <button id="copy-instructions" class="ghost square" data-icon="agent" title="Copy instructions that let a coding agent read and answer these comments"></button>
       <span class="spacer"></span>
-      <button id="clear-review" class="ghost danger-text" title="Delete comments">Clear…</button>
+      <button id="clear-review" class="ghost square danger-text" data-icon="trash" title="Delete comments…"></button>
     </footer>
   </aside>
 </div>
 
 <div id="error" role="alert" hidden>
   <pre id="error-text"></pre>
-  <button id="error-close" class="ghost square" title="Dismiss">×</button>
+  <button id="error-close" class="ghost square" data-icon="close" title="Dismiss"></button>
 </div>
 <div id="modal" class="overlay" hidden>
   <div class="dialog">

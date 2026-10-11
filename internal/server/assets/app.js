@@ -293,7 +293,7 @@ function renderTree() {
         onclick: () => { state.dirOpen.set(path, !open); renderTree(); },
       },
       indent(depth),
-      el('span', { class: `twisty${open ? ' open' : ''}` }, chevron()),
+      el('span', { class: `twisty${open ? ' open' : ''}` }, icon('chevron')),
       diff && reviewBox(allFiles(child)),
       el('span', { class: 'name' }, label)));
       if (open) walk(child, path + '/', depth + 1);
@@ -308,7 +308,7 @@ function renderTree() {
         onclick: () => openFile(file.path),
       },
       indent(depth),
-      el('span', { class: 'twisty file-icon' }, fileIcon()),
+      el('span', { class: 'twisty file-icon' }, icon('file', 14)),
       diff && reviewBox([file]),
       el('span', { class: 'name' }, name),
       threads.length > 0 && el('span', {
@@ -644,8 +644,8 @@ function renderThreads() {
       el('div', { class: 'sub' },
         `${root.author}${replies ? ` + ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}`)),
     el('div', { class: 'hover-actions' },
-      el('button', { title: 'Copy comment ID', onclick: event => { event.stopPropagation(); copyText(root.id, 'Copied comment ID'); } }, 'Copy ID'),
-      el('button', { class: 'danger-text', title: 'Delete thread', onclick: event => { event.stopPropagation(); removeComment(root.id); } }, 'Delete'))));
+      el('button', { class: 'square', title: 'Copy comment ID', onclick: event => { event.stopPropagation(); copyText(root.id, 'Copied comment ID'); } }, icon('copy')),
+      el('button', { class: 'square danger-text', title: 'Delete thread', onclick: event => { event.stopPropagation(); removeComment(root.id); } }, icon('trash')))));
   }
   if (rows.length === 0) {
     rows.push(all.length
@@ -885,23 +885,37 @@ function pairLines(lines) {
   return pairs;
 }
 
-function chevron() {
+// Line icons on a 16px grid, drawn with currentColor. Buttons in the page
+// declare theirs with data-icon; everything else calls icon().
+const ICONS = {
+  chevron: '<path d="M6 3.5 10.5 8 6 12.5"/>',
+  file: '<path d="M4 1.75h5.25l3 3v9.5H4z M9 1.75V5h3.25"/>',
+  up: '<path d="M3.5 10 8 5.5l4.5 4.5"/>',
+  down: '<path d="M3.5 6 8 10.5 12.5 6"/>',
+  close: '<path d="m4 4 8 8M12 4l-8 8"/>',
+  help: '<circle cx="8" cy="8" r="6.25"/><path d="M6.25 6.25a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.15v.5"/><circle cx="8" cy="11.5" r=".5" fill="currentColor" stroke="none"/>',
+  panel: '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M10 2.75v10.5"/>',
+  inline: '<rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.5"/><path d="M4.5 6h7M4.5 8h7M4.5 10h5"/>',
+  split: '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M8 2.75v10.5M3.75 6h2.5M3.75 8.5h2.5M9.75 6h2.5M9.75 8.5h2.5"/>',
+  copy: '<rect x="5.25" y="5.25" width="8" height="8" rx="1.25"/><path d="M10.75 5.25v-1.5c0-.55-.45-1-1-1h-6c-.55 0-1 .45-1 1v6c0 .55.45 1 1 1h1.5"/>',
+  agent: '<rect x="3.25" y="2.75" width="9.5" height="11" rx="1.25"/><path d="M6 2.75V2h4v.75M5.5 7h5M5.5 9.25h5M5.5 11.5h3"/>',
+  edit: '<path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z M9 4.25 11.75 7"/>',
+  trash: '<path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9M6.75 6.75v4M9.25 6.75v4"/>',
+  reply: '<path d="M6.25 3.5 2.75 7l3.5 3.5M2.75 7h6.5a4 4 0 0 1 4 4v1.5"/>',
+};
+
+function icon(name, size = 16) {
+  if (!ICONS[name]) throw new Error(`unknown icon: ${name}`);
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
   svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '16');
-  svg.setAttribute('height', '16');
-  svg.innerHTML = '<path d="M6 3.5 10.5 8 6 12.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>';
+  svg.setAttribute('width', size);
+  svg.setAttribute('height', size);
+  svg.setAttribute('class', 'icon');
+  svg.innerHTML = ICONS[name];
   return svg;
 }
 
-function fileIcon() {
-  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('viewBox', '0 0 16 16');
-  svg.setAttribute('width', '14');
-  svg.setAttribute('height', '14');
-  svg.innerHTML = '<path d="M4 1.75h5.25L12.25 4.75v9.5H4z M9 1.75v3.25h3.25" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>';
-  return svg;
-}
+document.querySelectorAll('button[data-icon]').forEach(button => button.prepend(icon(button.dataset.icon)));
 
 const KIND_CLASS = { '+': 'add', '-': 'del', ' ': '' };
 
@@ -950,16 +964,16 @@ function renderThread(root) {
           el('span', { class: 'author' }, comment.author),
           el('time', { datetime: comment.createdAt, title: new Date(comment.createdAt).toLocaleString() }, formatTime(comment.createdAt)),
           el('span', { class: 'actions' },
-            el('button', { class: 'ghost', title: 'Copy comment ID', onclick: () => copyText(comment.id, 'Copied comment ID') }, 'Copy ID'),
-            el('button', { class: 'ghost', onclick: () => startComposer({ kind: 'edit', commentId: comment.id }) }, 'Edit'),
-            el('button', { class: 'ghost danger-text', onclick: () => removeComment(comment.id) }, 'Delete'))),
+            el('button', { class: 'ghost square', title: 'Copy comment ID', onclick: () => copyText(comment.id, 'Copied comment ID') }, icon('copy')),
+            el('button', { class: 'ghost square', title: 'Edit (e)', onclick: () => startComposer({ kind: 'edit', commentId: comment.id }) }, icon('edit')),
+            el('button', { class: 'ghost square danger-text', title: 'Delete (x)', onclick: () => removeComment(comment.id) }, icon('trash')))),
         composer?.kind === 'edit' && composer.commentId === comment.id
           ? composerEl
           : el('div', { class: 'body' }, comment.body)))),
     composer?.kind === 'reply' && composer.rootId === root.id
       ? composerEl
       : el('div', { class: 'thread-foot' },
-        el('button', { onclick: () => startComposer({ kind: 'reply', rootId: root.id }) }, 'Reply')));
+        el('button', { onclick: () => startComposer({ kind: 'reply', rootId: root.id }) }, icon('reply'), 'Reply')));
 }
 
 // Keeps the row at the top of the viewport in place across re-renders.
