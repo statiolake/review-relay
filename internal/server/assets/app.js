@@ -16,6 +16,7 @@ const state = {
   layout: 'split',
   selection: null,    // {start, end} zero-based new-side lines
   cursor: null,       // zero-based new-side line of the current line
+  cursorFold: null,   // data-key of the fold the cursor is on instead of a line
   visual: null,       // anchor line while in visual line mode
   hiddenThreads: new Set(), // root ids folded away with zc / zm
   picker: null,       // {ids, index} while choosing a thread or comment by number
@@ -197,6 +198,7 @@ async function openFile(path, target) {
     state.view = null;
     state.selection = null;
     state.cursor = null;
+    state.cursorFold = null;
     state.visual = null;
     state.composer = null;
     for (let i = path.indexOf('/'); i >= 0; i = path.indexOf('/', i + 1)) state.dirOpen.set(path.slice(0, i), true);
@@ -747,10 +749,12 @@ function renderView() {
       while (end < items.length && !visible[end]) end++;
       const runKey = `${view.path}\0${itemKey(items[i])}`;
       const count = end - i;
-      body.append(el('div', {
+      const fold = el('div', {
         class: 'fold', 'data-key': `f${itemKey(items[i])}`,
-        onclick: () => { state.expanded.add(runKey); renderView(); },
-      }, `Show ${count} unchanged line${count === 1 ? '' : 's'}`));
+        onclick: () => expandFold(fold),
+      }, `Show ${count} unchanged line${count === 1 ? '' : 's'}`);
+      fold.runKey = runKey;
+      body.append(fold);
       i = end;
       previousChanged = false;
       continue;
@@ -1017,14 +1021,38 @@ function scrollToPendingTarget() {
 }
 
 // ---- Cursor -----------------------------------------------------------------
-// The cursor is a zero-based new-side line, like the lines comments attach to.
-// It only lands on rows that have a new side; deleted-only rows are skipped.
+// The cursor stops on rows that have a new side, holding that zero-based line
+// like the lines comments attach to, and on folded runs, holding the fold's
+// key with no line. Deleted-only rows are skipped.
 
-const cursorRows = () => [...document.querySelectorAll('#content .row[data-line]')];
+const cursorRows = () => [...document.querySelectorAll('#content .row[data-line], #content .fold')];
 const rowOfLine = line => $(`#content .row[data-line="${line}"]`);
+const isCursorRow = row => row.classList.contains('fold')
+  ? row.dataset.key === state.cursorFold
+  : Number(row.dataset.line) === state.cursor;
+const cursorRow = () => cursorRows().find(isCursorRow) ?? null;
+
+function setCursorRow(row, reveal = true) {
+  if (!row.classList.contains('fold')) { setCursor(Number(row.dataset.line), reveal); return; }
+  state.cursor = null;
+  state.cursorFold = row.dataset.key;
+  applySelection();
+  if (reveal) revealCursor();
+}
+
+// Shows the folded run and keeps the cursor where the fold was, on the first
+// revealed line.
+function expandFold(fold) {
+  const position = cursorRows().indexOf(fold);
+  const hadCursor = isCursorRow(fold);
+  state.expanded.add(fold.runKey);
+  renderView();
+  if (hadCursor) setCursorRow(cursorRows()[position]);
+}
 
 function setCursor(line, reveal = true) {
   state.cursor = line;
+  state.cursorFold = null;
   if (state.visual !== null) {
     state.selection = { start: Math.min(state.visual, line), end: Math.max(state.visual, line) };
   }
@@ -1033,7 +1061,7 @@ function setCursor(line, reveal = true) {
 }
 
 function revealCursor() {
-  const row = rowOfLine(state.cursor);
+  const row = cursorRow();
   if (!row) return;
   const content = $('#content');
   const box = row.getBoundingClientRect();
@@ -1046,7 +1074,7 @@ function revealCursor() {
 function moveCursor(delta) {
   const rows = cursorRows();
   if (!rows.length) return;
-  let i = rows.findIndex(row => Number(row.dataset.line) === state.cursor);
+  let i = rows.findIndex(isCursorRow);
   if (i < 0) {
     // No cursor yet: start at the first row on screen.
     const top = $('#content').getBoundingClientRect().top;
@@ -1054,13 +1082,13 @@ function moveCursor(delta) {
   } else {
     i = Math.max(0, Math.min(rows.length - 1, i + delta));
   }
-  setCursor(Number(rows[i].dataset.line));
+  setCursorRow(rows[i]);
 }
 
 function moveCursorTo(position) {
   const rows = cursorRows();
   if (!rows.length) return;
-  setCursor(Number(rows[Math.min(position, rows.length - 1)].dataset.line));
+  setCursorRow(rows[Math.min(position, rows.length - 1)]);
 }
 
 // Moves the cursor to the |count|-th next (count > 0) or previous block of
@@ -1231,6 +1259,7 @@ function applySelection() {
     row.classList.toggle('selected', !!selection && line >= selection.start && line <= selection.end);
     row.classList.toggle('cursor', line === state.cursor);
   }
+  for (const fold of document.querySelectorAll('#content .fold')) fold.classList.toggle('cursor', isCursorRow(fold));
 }
 
 $('#content').addEventListener('mousedown', event => {
@@ -1241,6 +1270,7 @@ $('#content').addEventListener('mousedown', event => {
   const anchor = event.shiftKey && state.selection ? state.selection.start : line;
   state.drag = { anchor };
   state.cursor = line;
+  state.cursorFold = null;
   state.selection = { start: Math.min(anchor, line), end: Math.max(anchor, line) };
   applySelection();
 });
@@ -1504,7 +1534,12 @@ document.addEventListener('keydown', event => {
       keys.pending = 'z';
       keys.pendingAt = Date.now();
       break;
+    case 'Enter':
+      if (state.cursorFold && cursorRow()) expandFold(cursorRow());
+      break;
     case 'o':
+      if (pending === 'z' && state.cursorFold && cursorRow()) { expandFold(cursorRow()); break; }
+      // fall through
     case 'c':
     case 'm':
     case 'R':
