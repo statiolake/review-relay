@@ -51,7 +51,7 @@ Keyboard (Vim-like normal mode; `?` shows all):
 | `Ctrl-p` `Ctrl-n` | Previous / next thread across files, following the panel filter |
 | `V` | Select lines |
 | `a` | Add a thread on the current line or selection |
-| `r` `e` `x` `dd` | On the current line's thread: reply / edit a comment / delete a comment / delete the whole thread (several comments are numbered to choose) |
+| `r` `e` `x` `dd` | On the current line's thread: reply / edit a comment / delete a comment / delete the whole thread (several threads or comments are numbered to choose) |
 | `zo` `zc` `zR` `zm` | Show / hide the thread on the current line; show / hide all |
 | `Space` | Toggle reviewed for the file |
 | `/` or `⌘F`, then `n` `p` | Find in file; Enter accepts, `n` / `p` step through matches |

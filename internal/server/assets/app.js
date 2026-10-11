@@ -18,7 +18,7 @@ const state = {
   cursor: null,       // zero-based new-side line of the current line
   visual: null,       // anchor line while in visual line mode
   hiddenThreads: new Set(), // root ids folded away with zc / zm
-  picker: null,       // {action: 'edit'|'delete', rootId, index} while choosing a comment
+  picker: null,       // {ids, index} while choosing a thread or comment by number
   drag: null,         // {anchor} while selecting with the mouse
   composer: null,     // {kind: 'new'|'reply'|'edit', line, endLine, rootId, commentId}
   pendingTarget: null,
@@ -940,12 +940,13 @@ function renderThread(root) {
   const composer = state.composer;
   return el('div', { class: `thread ${status}`, 'data-root': root.id },
     el('div', { class: 'thread-head' }, lineLabel(root.line, root.endLine)),
-    thread.map((comment, i) => el('div', {
-      class: `comment ${comment.source}${state.picker?.rootId === root.id && state.picker.index === i ? ' picked' : ''}`,
+    thread.map(comment => el('div', {
+      class: `comment ${comment.source}${state.picker?.ids[state.picker.index] === comment.id ? ' picked' : ''}`,
+      'data-comment': comment.id,
     },
       el('div', {},
         el('div', { class: 'meta' },
-          state.picker?.rootId === root.id && el('kbd', { class: 'pick-num' }, String(i + 1)),
+          state.picker?.ids.includes(comment.id) && el('kbd', { class: 'pick-num' }, String(state.picker.ids.indexOf(comment.id) + 1)),
           el('span', { class: 'author' }, comment.author),
           el('time', { datetime: comment.createdAt, title: new Date(comment.createdAt).toLocaleString() }, formatTime(comment.createdAt)),
           el('span', { class: 'actions' },
@@ -1098,20 +1099,20 @@ function jumpToThread(direction) {
   openFile(target.path, { line: target.line, endLine: target.endLine, commentId: target.id });
 }
 
-// The thread covering the cursor line; the narrowest one if several do.
-function threadAtCursor() {
-  if (state.cursor === null || !state.view) return null;
+// The threads covering the cursor line, outermost first.
+function threadsAtCursor() {
+  if (state.cursor === null || !state.view) return [];
   const hits = roots().filter(root => root.path === state.view.path && root.line <= state.cursor && state.cursor <= root.endLine);
-  if (!hits.length) { toast('No thread on this line'); return null; }
-  return hits.sort((a, b) => (a.endLine - a.line) - (b.endLine - b.line))[0];
+  if (!hits.length) toast('No thread on this line');
+  return hits.sort((a, b) => a.line - b.line || b.endLine - a.endLine);
 }
 
-// zo / zc open or close the thread on the current line; zR / zm all threads.
-function foldThreads(key) {
+// zo / zc open or close a thread on the current line; zR / zm all threads.
+async function foldThreads(key) {
   if (key === 'm') roots().forEach(root => state.hiddenThreads.add(root.id));
   else if (key === 'R') state.hiddenThreads.clear();
   else {
-    const root = threadAtCursor();
+    const root = await chooseThread(key === 'o' ? 'Show' : 'Hide');
     if (!root) return;
     if (key === 'o') state.hiddenThreads.delete(root.id);
     else state.hiddenThreads.add(root.id);
@@ -1119,40 +1120,79 @@ function foldThreads(key) {
   renderView();
 }
 
-// ---- Choosing a comment (x, e) -------------------------------------------------
-// With several comments in the thread on the current line, they get numbers:
-// press one, or move with j / k and press Enter. A lone comment is acted on
-// directly.
+// ---- Choosing (dd, r, x, e, zo, zc) --------------------------------------------
+// When the current line has several candidates (threads on the line, or
+// comments in a thread), they get numbers: press one, or move with j / k and
+// press Enter. A lone candidate is taken directly. Threads are numbered on
+// their first comment.
 
-function startPicker(action) {
-  const root = threadAtCursor();
-  if (!root) return;
-  state.hiddenThreads.delete(root.id);
-  const thread = threadOf(root.id);
-  if (thread.length === 1) { actOnComment(action, thread[0]); return; }
-  state.picker = { action, rootId: root.id, index: thread.length - 1 };
+let pickerResolve = null;
+
+function choose(comments, prompt) {
+  if (comments.length <= 1) return Promise.resolve(comments[0] || null);
+  comments.forEach(comment => state.hiddenThreads.delete(comment.parentId || comment.id));
   renderView();
-  $(`#content .thread[data-root="${root.id}"]`)?.scrollIntoView({ block: 'nearest' });
-  toast(`${action === 'edit' ? 'Edit' : 'Delete'} which comment? 1–${thread.length}, j / k + Enter, Esc to cancel`);
+  // Number in screen order so 1 is the topmost candidate.
+  const shown = [...document.querySelectorAll('#content [data-comment]')].map(node => node.dataset.comment);
+  const ids = comments.map(comment => comment.id).sort((a, b) => shown.indexOf(a) - shown.indexOf(b));
+  if (ids.some(id => !shown.includes(id))) throw new Error(`choice not on screen: ${ids}`);
+  state.picker = { ids, index: ids.length - 1 };
+  renderView();
+  $(`#content [data-comment="${ids[0]}"]`)?.scrollIntoView({ block: 'nearest' });
+  toast(`${prompt} 1–${comments.length}, j / k + Enter, Esc to cancel`);
+  return new Promise(resolve => {
+    pickerResolve = id => resolve(comments.find(comment => comment.id === id) || null);
+  });
+}
+
+function chooseThread(verb) {
+  return choose(threadsAtCursor(), `${verb} which thread?`);
+}
+
+async function chooseComment(verb) {
+  const root = await chooseThread(verb);
+  if (!root) return null;
+  state.hiddenThreads.delete(root.id);
+  return choose(threadOf(root.id), `${verb} which comment?`);
 }
 
 function pickerKey(event) {
   const picker = state.picker;
-  const thread = threadOf(picker.rootId);
   event.preventDefault();
-  let chosen = null;
-  if (/^[1-9]$/.test(event.key) && Number(event.key) <= thread.length) chosen = Number(event.key) - 1;
-  else if (event.key === 'Enter') chosen = picker.index;
-  else if (event.key === 'j' || event.key === 'ArrowDown') picker.index = Math.min(thread.length - 1, picker.index + 1);
-  else if (event.key === 'k' || event.key === 'ArrowUp') picker.index = Math.max(0, picker.index - 1);
-  else if (event.key !== 'Escape') return;
-  state.picker = chosen === null && event.key !== 'Escape' ? { ...picker } : null;
+  let chosen;
+  if (/^[1-9]$/.test(event.key) && Number(event.key) <= picker.ids.length) chosen = picker.ids[Number(event.key) - 1];
+  else if (event.key === 'Enter') chosen = picker.ids[picker.index];
+  else if (event.key === 'Escape') chosen = null;
+  else {
+    if (event.key === 'j' || event.key === 'ArrowDown') picker.index = Math.min(picker.ids.length - 1, picker.index + 1);
+    else if (event.key === 'k' || event.key === 'ArrowUp') picker.index = Math.max(0, picker.index - 1);
+    else return;
+    state.picker = { ...picker };
+    renderView();
+    return;
+  }
+  state.picker = null;
   renderView();
-  if (chosen !== null) actOnComment(picker.action, thread[chosen]);
+  const resolve = pickerResolve;
+  pickerResolve = null;
+  resolve(chosen);
 }
 
-async function actOnComment(action, comment) {
-  if (action === 'edit') { startComposer({ kind: 'edit', commentId: comment.id }); return; }
+async function editAtCursor() {
+  const comment = await chooseComment('Edit');
+  if (comment) startComposer({ kind: 'edit', commentId: comment.id });
+}
+
+async function replyAtCursor() {
+  const root = await chooseThread('Reply to');
+  if (!root) return;
+  state.hiddenThreads.delete(root.id);
+  startComposer({ kind: 'reply', rootId: root.id });
+}
+
+async function deleteCommentAtCursor() {
+  const comment = await chooseComment('Delete');
+  if (!comment) return;
   const size = threadOf(comment.parentId || comment.id).length;
   const text = !comment.parentId && size > 1
     ? `Delete the first comment? It starts the thread, so all ${size} comments go with it.`
@@ -1161,7 +1201,7 @@ async function actOnComment(action, comment) {
 }
 
 async function deleteThreadAtCursor() {
-  const root = threadAtCursor();
+  const root = await chooseThread('Delete');
   if (!root) return;
   const choice = await dialog(`Delete the thread on ${lineLabel(root.line, root.endLine)} (${threadOf(root.id).length} comment(s))?`,
     [{ label: 'Delete', value: true, class: 'destructive' }]);
@@ -1443,13 +1483,9 @@ document.addEventListener('keydown', event => {
       if (pending === 'd') deleteThreadAtCursor();
       else { keys.pending = 'd'; keys.pendingAt = Date.now(); }
       break;
-    case 'x': startPicker('delete'); break;
-    case 'r': {
-      const root = threadAtCursor();
-      if (root) { event.preventDefault(); state.hiddenThreads.delete(root.id); startComposer({ kind: 'reply', rootId: root.id }); }
-      break;
-    }
-    case 'e': startPicker('edit'); break;
+    case 'x': deleteCommentAtCursor(); break;
+    case 'r': replyAtCursor(); break;
+    case 'e': editAtCursor(); break;
     case 'z':
       keys.pending = 'z';
       keys.pendingAt = Date.now();
