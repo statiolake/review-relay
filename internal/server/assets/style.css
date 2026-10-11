@@ -194,7 +194,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .meta time { color: var(--fg-3); font-size: 12px; white-space: nowrap; }
 .comment .actions { margin-left: auto; display: flex; gap: 2px; visibility: hidden; }
 .comment:hover .actions, .comment:focus-within .actions { visibility: visible; }
-.comment .actions button { height: 22px; width: 22px; }
+.comment .actions button { height: 22px; min-width: 22px; padding: 0 3px; justify-content: center; font-size: 12px; gap: 3px; }
 .body { white-space: pre-wrap; word-break: break-word; }
 .comment .composer { padding: 6px 0 0; }
 .thread-foot { padding: 6px 12px 8px; border-top: 1px solid var(--line-soft); }
@@ -229,7 +229,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .thread-item .sub { color: var(--fg-3); font-size: 12px; }
 .thread-item .hover-actions { position: absolute; right: 8px; top: 5px; display: none; gap: 4px; }
 .thread-item:hover .hover-actions { display: flex; }
-.hover-actions button { height: 22px; width: 22px; }
+.hover-actions button { height: 22px; min-width: 22px; padding: 0 3px; justify-content: center; font-size: 12px; gap: 3px; }
+.comment .actions button.square, .hover-actions button.square { width: 22px; padding: 0; }
 
 /* ---- Overlays ---- */
 #error {
@@ -248,7 +249,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 20; padding: 6px 12px; border-radius: 4px; background: var(--fg); color: var(--bg); }
 
 #panel-foot { display: flex; align-items: center; gap: 2px; padding: 4px; border-top: 1px solid var(--line-soft); }
-#panel-foot button { height: 24px; }
+#panel-foot button { height: 24px; font-size: 12px; }
 
 /* ---- Syntax ---- */
 :root { --syn-keyword: #cf222e; --syn-string: #0a3069; --syn-comment: #6e7781; --syn-number: #0550ae; --syn-title: #8250df; --syn-type: #953800; --syn-attr: #0550ae; --syn-meta: #6e7781; }

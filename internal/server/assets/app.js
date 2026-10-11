@@ -644,7 +644,7 @@ function renderThreads() {
       el('div', { class: 'sub' },
         `${root.author}${replies ? ` + ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}`)),
     el('div', { class: 'hover-actions' },
-      el('button', { class: 'square', title: 'Copy comment ID', onclick: event => { event.stopPropagation(); copyText(root.id, 'Copied comment ID'); } }, icon('copy')),
+      el('button', { title: 'Copy comment ID', onclick: event => { event.stopPropagation(); copyText(root.id, 'Copied comment ID'); } }, icon('copy'), 'ID'),
       el('button', { class: 'square danger-text', title: 'Delete thread', onclick: event => { event.stopPropagation(); removeComment(root.id); } }, icon('trash')))));
   }
   if (rows.length === 0) {
@@ -964,7 +964,7 @@ function renderThread(root) {
           el('span', { class: 'author' }, comment.author),
           el('time', { datetime: comment.createdAt, title: new Date(comment.createdAt).toLocaleString() }, formatTime(comment.createdAt)),
           el('span', { class: 'actions' },
-            el('button', { class: 'ghost square', title: 'Copy comment ID', onclick: () => copyText(comment.id, 'Copied comment ID') }, icon('copy')),
+            el('button', { class: 'ghost', title: 'Copy comment ID', onclick: () => copyText(comment.id, 'Copied comment ID') }, icon('copy'), 'ID'),
             el('button', { class: 'ghost square', title: 'Edit (e)', onclick: () => startComposer({ kind: 'edit', commentId: comment.id }) }, icon('edit')),
             el('button', { class: 'ghost square danger-text', title: 'Delete (x)', onclick: () => removeComment(comment.id) }, icon('trash')))),
         composer?.kind === 'edit' && composer.commentId === comment.id
