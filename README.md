@@ -36,12 +36,12 @@ Arguments are passed to `git diff` unchanged. When the diff's new side is the wo
 
 In the viewer:
 
-- Click a line number, or drag across line numbers, to start a thread. Shift-click extends the selection. ⌘/Ctrl+Enter submits, Esc cancels.
+- Click a line number, or drag across line numbers, to start a thread. Shift-click extends the selection. ⌘Enter (Ctrl+Enter on other platforms) submits, Esc cancels.
 - In a diff, unchanged stretches are folded; click a fold to expand it. A bar in the left margin marks each thread's lines: amber while it waits for the agent, violet once the agent replied.
 - The right panel lists threads (Waiting / Answered / All) and holds the overall comment. **Copy agent instructions** at its bottom copies what an agent needs to connect.
 - Code is syntax highlighted for common languages.
 
-Keyboard (Vim-like normal mode; `?` shows all):
+Keyboard (Vim-like normal mode; `?` shows all). `⌘` shortcuts use Ctrl on Linux and Windows; on macOS, Ctrl keeps its text-editing meaning in input fields.
 
 | Keys | Action |
 | --- | --- |

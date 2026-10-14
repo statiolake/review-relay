@@ -3,6 +3,13 @@
 const POLL_MS = 1500;
 const CONTEXT = 3; // unchanged lines kept around each change when folding
 
+// App shortcuts use the platform's command key: ⌘ on macOS, Ctrl elsewhere.
+// On macOS Ctrl is left to the text system (Ctrl-F moves the caret) and to
+// the Vim keys.
+const MAC = /^Mac/.test(navigator.platform);
+const commandKey = event => MAC ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+const commandLabel = key => (MAC ? '⌘' : 'Ctrl+') + key;
+
 const state = {
   session: null,
   files: [],          // [{path, oldPath, status, hash}]
@@ -686,7 +693,7 @@ function renderView() {
         ? el('div', { class: 'empty big' }, el('strong', {}, state.session.diff ? 'No changes' : 'No files'))
         : el('div', { class: 'empty big' },
           el('strong', {}, 'No file open'),
-          el('kbd', {}, '}'), ' next file · ', el('kbd', {}, '⌘E'), ' go to file · ', el('kbd', {}, '?'), ' shortcuts'));
+          el('kbd', {}, '}'), ' next file · ', el('kbd', {}, commandLabel('E')), ' go to file · ', el('kbd', {}, '?'), ' shortcuts'));
     return;
   }
 
@@ -920,6 +927,7 @@ function icon(name, size = 16) {
 }
 
 document.querySelectorAll('button[data-icon]').forEach(button => button.prepend(icon(button.dataset.icon)));
+document.querySelectorAll('kbd[data-command]').forEach(kbd => { kbd.textContent = commandLabel(kbd.dataset.command); });
 
 const KIND_CLASS = { '+': 'add', '-': 'del', ' ': '' };
 
@@ -1305,14 +1313,14 @@ const composerEl = el('div', { class: 'composer' },
   el('div', { class: 'title' }),
   el('textarea', { spellcheck: 'false' }),
   el('div', { class: 'actions' },
-    el('span', { class: 'hint' }, '⌘ Enter to submit · Esc to cancel'),
+    el('span', { class: 'hint' }, `${commandLabel('Enter')} to submit · Esc to cancel`),
     el('button', { class: 'ghost', onclick: () => closeComposer() }, 'Cancel'),
     el('button', { class: 'primary', onclick: () => submitComposer() }, 'Comment')));
 const composerText = composerEl.querySelector('textarea');
 
 composerText.addEventListener('keydown', event => {
   if (event.isComposing) return;
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) { event.preventDefault(); submitComposer(); }
+  if (event.key === 'Enter' && commandKey(event)) { event.preventDefault(); submitComposer(); }
   if (event.key === 'Escape') { event.preventDefault(); closeComposer(); }
 });
 
@@ -1458,8 +1466,8 @@ const keys = { count: '', pending: null, pendingAt: 0 };
 
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && !$('#help').hidden) { $('#help').hidden = true; return; }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'e') { event.preventDefault(); openFinder(); return; }
-  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
+  if (commandKey(event) && event.key.toLowerCase() === 'e') { event.preventDefault(); openFinder(); return; }
+  if (commandKey(event) && event.key.toLowerCase() === 'f') { event.preventDefault(); openSearch(); return; }
   if (openDialog) { dialogKey(event); return; }
   if (state.picker) { pickerKey(event); return; }
   if (!$('#finder').hidden || typing() || event.metaKey || event.altKey) return;
