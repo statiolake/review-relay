@@ -17,9 +17,11 @@ static WKWebView *findWebView(NSView *view) {
 
 // Paints the window in the page's background color (light or dark, following
 // the system appearance) and stops WKWebView from drawing its own white
-// background, so nothing flashes before the page's first paint.
+// background, so nothing flashes before the page's first paint. The title
+// bar is transparent, so it shows the same color and reads as part of the app.
 static void matchBackground(void *window) {
 	NSWindow *w = (NSWindow *)window;
+	w.titlebarAppearsTransparent = YES;
 	w.backgroundColor = [NSColor colorWithName:nil dynamicProvider:^NSColor *(NSAppearance *appearance) {
 		NSAppearanceName name = [appearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
 		return [name isEqualToString:NSAppearanceNameDarkAqua]
