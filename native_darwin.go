@@ -71,14 +71,29 @@ static void installMenu(void) {
 
 	NSApp.mainMenu = bar;
 }
+
+// Shows the app icon in the Dock and the app switcher; a bare executable
+// has no bundle to carry one.
+static void setIcon(const void *png, int length) {
+	NSImage *image = [[NSImage alloc] initWithData:[NSData dataWithBytes:png length:length]];
+	if (!image) abort(); // the embedded PNG is fixed at build time
+	NSApp.applicationIconImage = image;
+}
 */
 import "C"
 
-import "unsafe"
+import (
+	_ "embed"
+	"unsafe"
+)
+
+//go:embed internal/server/assets/icon.png
+var appIcon []byte
 
 // setupNative must run on the UI thread before the page loads. The window
 // colors match --bg in assets/style.css and the inline style in index.html.
 func setupNative(window unsafe.Pointer) {
 	C.matchBackground(window)
 	C.installMenu()
+	C.setIcon(unsafe.Pointer(&appIcon[0]), C.int(len(appIcon)))
 }

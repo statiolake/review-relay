@@ -74,6 +74,7 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /{$}", http.FileServerFS(static))
 	mux.Handle("GET /app.js", http.FileServerFS(static))
 	mux.Handle("GET /style.css", http.FileServerFS(static))
+	mux.Handle("GET /icon.svg", http.FileServerFS(static))
 	mux.Handle("GET /highlight/", http.FileServerFS(static))
 
 	mux.HandleFunc("GET /health", s.handle(func(*http.Request) (int, any, error) {

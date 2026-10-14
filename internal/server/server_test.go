@@ -179,4 +179,11 @@ func TestReviewedAndViews(t *testing.T) {
 	if !strings.Contains(string(page), "app.js") {
 		t.Fatal("index not served")
 	}
+	for _, asset := range []string{"/app.js", "/style.css", "/icon.svg", "/highlight/highlight.min.js"} {
+		resp, err := http.Get(ts.URL + asset)
+		if err != nil || resp.StatusCode != 200 {
+			t.Fatalf("GET %s: %v %v", asset, resp, err)
+		}
+		resp.Body.Close()
+	}
 }

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#26292f"/>
+      <stop offset="1" stop-color="#16171a"/>
+    </linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="184" fill="url(#body)"/>
+  <rect x="100.5" y="100.5" width="823" height="823" rx="183.5" fill="none" stroke="#ffffff" stroke-opacity=".08"/>
+  <!-- code lines -->
+  <g fill="#ffffff" fill-opacity=".16">
+    <rect x="236" y="236" width="300" height="36" rx="18"/>
+    <rect x="296" y="316" width="420" height="36" rx="18"/>
+    <rect x="296" y="476" width="340" height="36" rx="18"/>
+    <rect x="236" y="636" width="160" height="36" rx="18"/>
+    <rect x="236" y="716" width="160" height="36" rx="18"/>
+  </g>
+  <!-- the commented line: amber margin mark and a highlighted line -->
+  <rect x="172" y="396" width="20" height="116" rx="10" fill="#e0a12a"/>
+  <rect x="296" y="396" width="500" height="36" rx="18" fill="#e0a12a" fill-opacity=".9"/>
+  <!-- the agent's answer -->
+  <path d="M520 584h40v-60l64 60h124a56 56 0 0 1 56 56v72a56 56 0 0 1-56 56H520a56 56 0 0 1-56-56v-72a56 56 0 0 1 56-56z" fill="#8b6ce8"/>
+  <g fill="#ffffff" fill-opacity=".9">
+    <rect x="524" y="638" width="220" height="28" rx="14"/>
+    <rect x="524" y="686" width="140" height="28" rx="14"/>
+  </g>
+</svg>

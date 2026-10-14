@@ -1,5 +1,7 @@
 # review-relay
 
+<img src="internal/server/assets/icon.svg" width="96" alt="">
+
 A lightweight, standalone review viewer whose inline comments are shared live with local coding agents. It is the standalone counterpart of the [Review Relay](https://github.com/statiolake/vscode-review-relay) VS Code extension, meant to sit next to a terminal editor such as Vim.
 
 - File tree and read-only preview in a native window (the OS WebView; no browser or Electron)
