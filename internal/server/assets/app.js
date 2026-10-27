@@ -26,6 +26,7 @@ const state = {
   cursorFold: null,   // data-key of the fold the cursor is on instead of a line
   visual: null,       // anchor line while in visual line mode
   hiddenThreads: new Set(), // root ids folded away with zc / zm
+  openResolved: new Set(),  // resolved root ids expanded with zo or a click
   picker: null,       // {ids, index} while choosing a thread or comment by number
   drag: null,         // {anchor} while selecting with the mouse
   composer: null,     // {kind: 'new'|'reply'|'edit', line, endLine, rootId, commentId}
@@ -133,8 +134,10 @@ async function copyText(text, message) {
 
 const roots = () => state.comments.filter(c => !c.parentId);
 const threadOf = rootId => state.comments.filter(c => c.id === rootId || c.parentId === rootId);
-const threadState = rootId => threadOf(rootId).at(-1).source === 'agent' ? 'answered' : 'waiting';
-const STATE_LABEL = { waiting: 'Waiting for AI', answered: 'AI replied' };
+const threadState = rootId => state.comments.find(c => c.id === rootId).resolved ? 'resolved'
+  : threadOf(rootId).at(-1).source === 'agent' ? 'answered' : 'waiting';
+const STATE_LABEL = { waiting: 'Waiting for AI', answered: 'AI replied', resolved: 'Resolved' };
+const inFilter = root => state.threadFilter === 'all' || threadState(root.id) === state.threadFilter;
 const lineLabel = (line, endLine) => line === endLine ? `L${line + 1}` : `L${line + 1}–${endLine + 1}`;
 const isReviewed = file => !!file?.hash && state.reviewed[file.path] === file.hash;
 const fileEntry = path => state.files.find(f => f.path === path);
@@ -278,6 +281,7 @@ function renderTree() {
   const diff = state.session.diff;
   const threadsByPath = new Map();
   for (const c of roots()) {
+    if (c.resolved) continue; // done; nothing left to look at
     const list = threadsByPath.get(c.path) ?? [];
     list.push(threadState(c.id));
     threadsByPath.set(c.path, list);
@@ -622,13 +626,13 @@ for (const button of document.querySelectorAll('#layout-toggle button')) {
 
 function renderThreads() {
   const all = roots().sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
-  const counts = { all: all.length, waiting: 0, answered: 0 };
+  const counts = { all: all.length, waiting: 0, answered: 0, resolved: 0 };
   for (const root of all) counts[threadState(root.id)]++;
   for (const button of document.querySelectorAll('#thread-filter button')) {
     button.classList.toggle('active', button.dataset.filter === state.threadFilter);
     button.querySelector('span').textContent = counts[button.dataset.filter] || '';
   }
-  const shown = all.filter(root => state.threadFilter === 'all' || threadState(root.id) === state.threadFilter);
+  const shown = all.filter(inFilter);
 
   const rows = [];
   let currentPath = null;
@@ -654,6 +658,10 @@ function renderThreads() {
         `${root.author}${replies ? ` + ${replies} ${replies === 1 ? 'reply' : 'replies'}` : ''}`)),
     el('div', { class: 'hover-actions' },
       el('button', { title: 'Copy comment ID', onclick: event => { event.stopPropagation(); copyText(root.id, 'Copied comment ID'); } }, icon('copy'), 'ID'),
+      el('button', {
+        class: 'square', title: root.resolved ? 'Unresolve' : 'Resolve',
+        onclick: event => { event.stopPropagation(); setResolved(root.id, !root.resolved); },
+      }, icon(root.resolved ? 'reopen' : 'check')),
       el('button', { class: 'square danger-text', title: 'Delete thread', onclick: event => { event.stopPropagation(); removeComment(root.id); } }, icon('trash')))));
   }
   if (rows.length === 0) {
@@ -678,7 +686,7 @@ function renderView() {
   const view = state.view;
   const fileComments = view ? state.comments.filter(c => c.path === view.path) : [];
   const key = JSON.stringify([state.selected, view?.version, view?.path, state.layout, fileComments, state.composer,
-    [...state.expanded], state.pendingTarget, search.query, [...state.hiddenThreads], state.picker]);
+    [...state.expanded], state.pendingTarget, search.query, [...state.hiddenThreads], [...state.openResolved], state.picker]);
   if (key === state.renderedKey) {
     applySelection();
     return;
@@ -721,7 +729,7 @@ function renderView() {
     const status = threadState(root.id);
     for (let line = root.line; line <= root.endLine; line++) {
       const mark = marks.get(line) ?? { status, start: false, end: false };
-      if (status === 'waiting') mark.status = 'waiting'; // the louder mark wins
+      if (MARK_RANK[status] > MARK_RANK[mark.status]) mark.status = status; // the louder mark wins
       mark.start ||= line === root.line;
       mark.end ||= line === root.endLine;
       marks.set(line, mark);
@@ -790,6 +798,8 @@ function renderView() {
   restoreComposerFocus(composerFocus);
   updateSearch();
 }
+
+const MARK_RANK = { resolved: 0, answered: 1, waiting: 2 };
 
 function foldable(view) {
   return !!view.status && view.lines.some(l => l.k !== ' ');
@@ -913,6 +923,8 @@ const ICONS = {
   edit: '<path d="M10.5 2.75 13.25 5.5 6 12.75H3.25V10z M9 4.25 11.75 7"/>',
   trash: '<path d="M2.75 4.25h10.5M6.25 4.25V2.75h3.5v1.5M4.25 4.25l.6 9h6.3l.6-9M6.75 6.75v4M9.25 6.75v4"/>',
   reply: '<path d="M6.25 3.5 2.75 7l3.5 3.5M2.75 7h6.5a4 4 0 0 1 4 4v1.5"/>',
+  check: '<path d="m3 8.5 3.25 3.25L13 5"/>',
+  reopen: '<path d="M3.25 8a4.75 4.75 0 1 0 1.4-3.36M3.25 2.75v2.5h2.5"/>',
 };
 
 function icon(name, size = 16) {
@@ -964,15 +976,45 @@ function renderThread(root) {
   const thread = threadOf(root.id);
   const status = threadState(root.id);
   const composer = state.composer;
+  const composing = composer && (composer.rootId === root.id || thread.some(c => c.id === composer.commentId));
+  const picked = id => state.picker?.ids[state.picker.index] === id;
+  const pickNum = id => state.picker?.ids.includes(id) && el('kbd', { class: 'pick-num' }, String(state.picker.ids.indexOf(id) + 1));
+  const resolveButton = el('button', {
+    class: 'resolve', title: `${root.resolved ? 'Reopen' : 'Done with this thread; stop showing it'} (s)`,
+    onclick: event => { event.stopPropagation(); setResolved(root.id, !root.resolved); },
+  }, icon(root.resolved ? 'reopen' : 'check'), root.resolved ? 'Unresolve' : 'Resolve');
+
+  // A resolved thread shrinks to one line until it is opened.
+  if (root.resolved && !state.openResolved.has(root.id) && !composing) {
+    const replies = thread.length - 1;
+    return el('div', { class: 'thread resolved collapsed', 'data-root': root.id },
+      el('div', {
+        class: `thread-head${picked(root.id) ? ' picked' : ''}`, 'data-comment': root.id, title: 'Show the resolved thread (zo)',
+        onclick: () => { state.openResolved.add(root.id); renderView(); },
+      },
+      pickNum(root.id),
+      el('span', { class: 'resolved-label' }, icon('check', 14), 'Resolved'),
+      el('span', {}, lineLabel(root.line, root.endLine)),
+      el('span', { class: 'preview' }, root.body.split('\n')[0]),
+      replies > 0 && el('span', {}, `+${replies}`),
+      resolveButton));
+  }
+
   return el('div', { class: `thread ${status}`, 'data-root': root.id },
-    el('div', { class: 'thread-head' }, lineLabel(root.line, root.endLine)),
+    el('div', {
+      class: 'thread-head',
+      onclick: root.resolved ? () => { state.openResolved.delete(root.id); renderView(); } : undefined,
+      title: root.resolved ? 'Collapse (zc)' : undefined,
+    },
+    root.resolved && el('span', { class: 'resolved-label' }, icon('check', 14), 'Resolved'),
+    lineLabel(root.line, root.endLine)),
     thread.map(comment => el('div', {
-      class: `comment ${comment.source}${state.picker?.ids[state.picker.index] === comment.id ? ' picked' : ''}`,
+      class: `comment ${comment.source}${picked(comment.id) ? ' picked' : ''}`,
       'data-comment': comment.id,
     },
       el('div', {},
         el('div', { class: 'meta' },
-          state.picker?.ids.includes(comment.id) && el('kbd', { class: 'pick-num' }, String(state.picker.ids.indexOf(comment.id) + 1)),
+          pickNum(comment.id),
           el('span', { class: 'author' }, comment.author),
           el('time', { datetime: comment.createdAt, title: new Date(comment.createdAt).toLocaleString() }, formatTime(comment.createdAt)),
           el('span', { class: 'actions' },
@@ -985,7 +1027,9 @@ function renderThread(root) {
     composer?.kind === 'reply' && composer.rootId === root.id
       ? composerEl
       : el('div', { class: 'thread-foot' },
-        el('button', { onclick: () => startComposer({ kind: 'reply', rootId: root.id }) }, icon('reply'), 'Reply')));
+        el('button', { title: root.resolved ? 'Reply (r); reopens the thread' : 'Reply (r)', onclick: () => startComposer({ kind: 'reply', rootId: root.id }) }, icon('reply'), 'Reply'),
+        el('span', { class: 'spacer' }),
+        resolveButton));
 }
 
 // Keeps the row at the top of the viewport in place across re-renders.
@@ -1129,7 +1173,7 @@ function jumpToChange(count, fromTop = false) {
 // Threads in the panel's current filter, in path and line order.
 function navigableThreads() {
   return roots()
-    .filter(root => state.threadFilter === 'all' || threadState(root.id) === state.threadFilter)
+    .filter(inFilter)
     .sort((a, b) => a.path.localeCompare(b.path) || a.line - b.line);
 }
 
@@ -1159,18 +1203,21 @@ function threadsAtCursor() {
 
 // zo / zc open or close a thread on the current line; zR / zm all threads.
 async function foldThreads(key) {
-  if (key === 'm') roots().forEach(root => state.hiddenThreads.add(root.id));
+  if (key === 'm') { roots().forEach(root => state.hiddenThreads.add(root.id)); state.openResolved.clear(); }
   else if (key === 'R') state.hiddenThreads.clear();
   else {
     const root = await chooseThread(key === 'o' ? 'Show' : 'Hide');
     if (!root) return;
-    if (key === 'o') state.hiddenThreads.delete(root.id);
-    else state.hiddenThreads.add(root.id);
+    // A resolved thread opens from hidden to collapsed to expanded, and
+    // closes the other way.
+    if (key === 'o') {
+      if (!state.hiddenThreads.delete(root.id) && root.resolved) state.openResolved.add(root.id);
+    } else if (!state.openResolved.delete(root.id)) state.hiddenThreads.add(root.id);
   }
   renderView();
 }
 
-// ---- Choosing (dd, r, x, e, zo, zc) --------------------------------------------
+// ---- Choosing (dd, r, x, e, s, zo, zc) --------------------------------------------
 // When the current line has several candidates (threads on the line, or
 // comments in a thread), they get numbers: press one, or move with j / k and
 // press Enter. A lone candidate is taken directly. Threads are numbered on
@@ -1203,6 +1250,7 @@ async function chooseComment(verb) {
   const root = await chooseThread(verb);
   if (!root) return null;
   state.hiddenThreads.delete(root.id);
+  if (root.resolved) state.openResolved.add(root.id);
   return choose(threadOf(root.id), `${verb} which comment?`);
 }
 
@@ -1238,6 +1286,12 @@ async function replyAtCursor() {
   if (!root) return;
   state.hiddenThreads.delete(root.id);
   startComposer({ kind: 'reply', rootId: root.id });
+}
+
+async function toggleResolvedAtCursor() {
+  const hits = threadsAtCursor();
+  const root = await choose(hits, hits.some(hit => !hit.resolved) ? 'Resolve or reopen which thread?' : 'Unresolve which thread?');
+  if (root) await setResolved(root.id, !root.resolved);
 }
 
 async function deleteCommentAtCursor() {
@@ -1385,6 +1439,13 @@ function restoreComposerFocus(focus) {
   if (!focus || !composerEl.isConnected) return;
   composerText.focus();
   composerText.setSelectionRange(focus.start, focus.end);
+}
+
+async function setResolved(rootId, resolved) {
+  state.openResolved.delete(rootId);
+  await api('PUT', `/v1/comments/${rootId}/resolved`, { resolved });
+  await refreshComments();
+  toast(resolved ? 'Resolved' : 'Reopened');
 }
 
 async function removeComment(id) {
@@ -1538,6 +1599,7 @@ document.addEventListener('keydown', event => {
     case 'x': deleteCommentAtCursor(); break;
     case 'r': replyAtCursor(); break;
     case 'e': editAtCursor(); break;
+    case 's': toggleResolvedAtCursor(); break;
     case 'z':
       keys.pending = 'z';
       keys.pendingAt = Date.now();

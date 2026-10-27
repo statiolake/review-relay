@@ -32,6 +32,10 @@ const (
 //
 // Path is slash-separated and relative to the workspace root. Line and EndLine
 // are zero-based and inclusive.
+//
+// Resolved marks a thread the user is done with. It lives on the root only;
+// a new reply reopens the thread. State files written before it existed load
+// as unresolved.
 type Comment struct {
 	ID        string    `json:"id"`
 	ParentID  string    `json:"parentId,omitempty"`
@@ -42,6 +46,7 @@ type Comment struct {
 	Author    string    `json:"author"`
 	Source    Source    `json:"source"`
 	CreatedAt time.Time `json:"createdAt"`
+	Resolved  bool      `json:"resolved,omitempty"`
 }
 
 // State is everything persisted for one workspace.
@@ -187,6 +192,9 @@ func (s State) Validate() error {
 		}
 		if parent.ParentID != "" {
 			return invalid("comments[%d]: parent %s is itself a reply", i, c.ParentID)
+		}
+		if c.Resolved {
+			return invalid("comments[%d]: only a thread's root can be resolved", i)
 		}
 		if parent.Path != c.Path || parent.Line != c.Line || parent.EndLine != c.EndLine {
 			return invalid("comments[%d]: a reply must have the same location as its parent", i)

@@ -119,3 +119,51 @@ func TestSubscribersRunAfterPersist(t *testing.T) {
 		t.Fatalf("calls = %d", calls)
 	}
 }
+
+func TestResolveAndReplyReopens(t *testing.T) {
+	s, file := openTemp(t)
+	loc := Location{Path: "a.go", Line: 0}
+	root, _ := s.Add(CommentInput{Location: loc, Body: "r"})
+	reply, _ := s.Reply(root.ID, CommentInput{Location: loc, Body: "1"})
+
+	// Resolving through a reply marks the root.
+	got, err := s.SetResolved(reply.ID, true)
+	if err != nil || got.ID != root.ID || !got.Resolved {
+		t.Fatalf("SetResolved = %+v, %v", got, err)
+	}
+	reopened, err := Open(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range reopened.Snapshot().Comments {
+		if c.Resolved != (c.ID == root.ID) {
+			t.Fatalf("resolved not persisted on the root only: %+v", c)
+		}
+	}
+
+	if _, err := s.Reply(root.ID, CommentInput{Location: loc, Body: "2"}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := s.Find(root.ID); c.Resolved {
+		t.Fatal("a reply did not reopen the thread")
+	}
+	if _, err := s.SetResolved("00000000-0000-4000-8000-000000000000", true); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("missing id: %v", err)
+	}
+}
+
+func TestOpenResolvedState(t *testing.T) {
+	const root = `{"id":"00000000-0000-4000-8000-000000000001","path":"a","line":0,"endLine":0,"body":"b","author":"A","source":"human","createdAt":"2026-01-01T00:00:00Z"`
+	const reply = `{"id":"00000000-0000-4000-8000-000000000002","parentId":"00000000-0000-4000-8000-000000000001","path":"a","line":0,"endLine":0,"body":"b","author":"A","source":"agent","createdAt":"2026-01-01T00:00:00Z"`
+	file := filepath.Join(t.TempDir(), "state.json")
+	// A state file from before resolving existed loads as unresolved.
+	os.WriteFile(file, []byte(`{"comments":[`+root+`}],"overall":""}`), 0o600)
+	s, err := Open(file)
+	if err != nil || s.Snapshot().Comments[0].Resolved {
+		t.Fatalf("old state: %v", err)
+	}
+	os.WriteFile(file, []byte(`{"comments":[`+root+`},`+reply+`,"resolved":true}],"overall":""}`), 0o600)
+	if _, err := Open(file); err == nil || !strings.Contains(err.Error(), "root") {
+		t.Fatalf("resolved reply accepted: %v", err)
+	}
+}

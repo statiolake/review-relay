@@ -92,8 +92,8 @@ func (s *Store) Add(input CommentInput) (Comment, error) {
 	})
 }
 
-// Reply appends to the thread containing id and moves the whole thread to the
-// reply's location.
+// Reply appends to the thread containing id, moves the whole thread to the
+// reply's location, and reopens the thread if it was resolved.
 func (s *Store) Reply(id string, input CommentInput) (Comment, error) {
 	if err := ValidateID(id); err != nil {
 		return Comment{}, err
@@ -115,11 +115,36 @@ func (s *Store) Reply(id string, input CommentInput) (Comment, error) {
 		for j := range state.Comments {
 			if x := &state.Comments[j]; x.ID == root || x.ParentID == root {
 				x.Path, x.Line, x.EndLine = c.Path, c.Line, c.EndLine
+				if x.ID == root {
+					x.Resolved = false
+				}
 			}
 		}
 		state.Comments = append(state.Comments, c)
 		return nil
 	})
+}
+
+// SetResolved resolves or reopens the thread containing id and returns the
+// thread's root.
+func (s *Store) SetResolved(id string, resolved bool) (Comment, error) {
+	if err := ValidateID(id); err != nil {
+		return Comment{}, err
+	}
+	var root Comment
+	err := s.mutate(func(state *State) error {
+		i := slices.IndexFunc(state.Comments, func(x Comment) bool { return x.ID == id })
+		if i < 0 {
+			return ErrNotFound
+		}
+		if parent := state.Comments[i].ParentID; parent != "" {
+			i = slices.IndexFunc(state.Comments, func(x Comment) bool { return x.ID == parent })
+		}
+		state.Comments[i].Resolved = resolved
+		root = state.Comments[i]
+		return nil
+	})
+	return root, err
 }
 
 // Update replaces a comment's body.

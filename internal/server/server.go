@@ -85,6 +85,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/comments", s.handle(s.clearComments))
 	mux.HandleFunc("POST /v1/comments/{id}/replies", s.handle(s.replyComment))
 	mux.HandleFunc("PATCH /v1/comments/{id}", s.handle(s.updateComment))
+	mux.HandleFunc("PUT /v1/comments/{id}/resolved", s.handle(s.resolveComment))
 	mux.HandleFunc("DELETE /v1/comments/{id}", s.handle(s.removeComment))
 	mux.HandleFunc("POST /v1/navigate", s.handle(s.navigate))
 
@@ -181,17 +182,38 @@ func readJSON(r *http.Request, into any) error {
 	return nil
 }
 
+// listComments returns the state, optionally narrowed to one path and to
+// threads that are (?resolved=true) or are not (?resolved=false) resolved.
 func (s *Server) listComments(r *http.Request) (int, any, error) {
 	state := s.store.Snapshot()
-	if p := r.URL.Query().Get("path"); p != "" {
-		filtered := []review.Comment{}
-		for _, c := range state.Comments {
-			if c.Path == p {
-				filtered = append(filtered, c)
-			}
-		}
-		state.Comments = filtered
+	query := r.URL.Query()
+	p := query.Get("path")
+	var wantResolved *bool
+	switch v := query.Get("resolved"); v {
+	case "":
+	case "true", "false":
+		b := v == "true"
+		wantResolved = &b
+	default:
+		return 0, nil, badRequest(errors.New(`resolved must be "true" or "false"`))
 	}
+	resolved := map[string]bool{}
+	for _, c := range state.Comments {
+		if c.ParentID == "" {
+			resolved[c.ID] = c.Resolved
+		}
+	}
+	filtered := []review.Comment{}
+	for _, c := range state.Comments {
+		root := c.ID
+		if c.ParentID != "" {
+			root = c.ParentID
+		}
+		if (p == "" || c.Path == p) && (wantResolved == nil || resolved[root] == *wantResolved) {
+			filtered = append(filtered, c)
+		}
+	}
+	state.Comments = filtered
 	return http.StatusOK, state, nil
 }
 
@@ -231,6 +253,23 @@ func (s *Server) updateComment(r *http.Request) (int, any, error) {
 		return 0, nil, err
 	}
 	return http.StatusOK, map[string]any{"comment": c}, nil
+}
+
+func (s *Server) resolveComment(r *http.Request) (int, any, error) {
+	var input struct {
+		Resolved *bool `json:"resolved"`
+	}
+	if err := readJSON(r, &input); err != nil {
+		return 0, nil, err
+	}
+	if input.Resolved == nil {
+		return 0, nil, badRequest(errors.New("resolved is required"))
+	}
+	root, err := s.store.SetResolved(r.PathValue("id"), *input.Resolved)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, map[string]any{"comment": root}, nil
 }
 
 func (s *Server) removeComment(r *http.Request) (int, any, error) {

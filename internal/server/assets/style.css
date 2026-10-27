@@ -23,6 +23,7 @@
   --void: #f6f7f8;
   --waiting: #c98a00;
   --answered: #7a58d6;
+  --resolved: #a9b1ba;
   --select: #fff3c4;
   --danger: #c2283b;
   --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -50,6 +51,7 @@
     --void: #1b1d20;
     --waiting: #e0a92e;
     --answered: #a189ef;
+    --resolved: #4f5661;
     --select: #3a3418;
     --danger: #ef7480;
   }
@@ -171,6 +173,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .row[data-mark]::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px; }
 .row[data-mark=waiting]::before { background: var(--waiting); }
 .row[data-mark=answered]::before { background: var(--answered); }
+.row[data-mark=resolved]::before { background: var(--resolved); }
 .fold {
   position: relative; height: 24px; padding-left: calc(var(--num-w) + 8px); line-height: 24px; cursor: pointer;
   color: var(--fg-2); font: 12px/24px var(--ui); background: var(--bg-alt);
@@ -186,6 +189,14 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .thread-head { display: flex; gap: 8px; padding: 6px 12px; border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--fg-3); background: var(--bg-alt); }
 .thread.waiting { border-left: 3px solid var(--waiting); }
 .thread.answered { border-left: 3px solid var(--answered); }
+.thread.resolved { border-left: 3px solid var(--resolved); }
+.thread.collapsed { background: var(--bg-alt); }
+.thread.collapsed .thread-head { border-bottom: 0; align-items: center; cursor: pointer; padding-top: 3px; padding-bottom: 3px; }
+.thread.collapsed .thread-head:hover { color: var(--fg-2); }
+.thread.resolved:not(.collapsed) .thread-head { cursor: pointer; }
+.thread-head .preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.resolved-label { display: inline-flex; align-items: center; gap: 4px; color: var(--fg-2); font-weight: 600; }
+.thread-head .resolve { height: 22px; padding: 0 6px; font-size: 12px; gap: 4px; margin-left: auto; }
 .comment { padding: 8px 12px; }
 .comment + .comment { border-top: 1px solid var(--line-soft); }
 .meta { display: flex; align-items: center; gap: 8px; min-height: 22px; }
@@ -197,7 +208,7 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .comment .actions button { height: 22px; min-width: 22px; padding: 0 3px; justify-content: center; font-size: 12px; gap: 3px; }
 .body { white-space: pre-wrap; word-break: break-word; }
 .comment .composer { padding: 6px 0 0; }
-.thread-foot { padding: 6px 12px 8px; border-top: 1px solid var(--line-soft); }
+.thread-foot { display: flex; align-items: center; padding: 6px 12px 8px; border-top: 1px solid var(--line-soft); }
 .thread-foot button { height: 24px; font-size: 12px; }
 .composer { display: grid; gap: 8px; padding: 10px 12px; }
 .thread > .composer { border-top: 1px solid var(--line-soft); }
@@ -223,6 +234,8 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .thread-item:hover { background: var(--bg-hover); }
 .thread-item.waiting { border-left-color: var(--waiting); }
 .thread-item.answered { border-left-color: var(--answered); }
+.thread-item.resolved { border-left-color: var(--resolved); }
+.thread-item.resolved .preview { color: var(--fg-3); text-decoration: line-through; text-decoration-color: var(--resolved); }
 .thread-item .title { display: flex; gap: 8px; align-items: baseline; min-width: 0; }
 .thread-item .lines { font: 12px var(--ui); font-variant-numeric: tabular-nums; color: var(--fg-3); flex: none; }
 .thread-item .preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -302,6 +315,6 @@ main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .row.cursor::after, .fold.cursor::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: color-mix(in srgb, var(--accent) 10%, transparent); box-shadow: inset 0 1px 0 color-mix(in srgb, var(--accent) 45%, transparent), inset 0 -1px 0 color-mix(in srgb, var(--accent) 45%, transparent); }
 
 /* ---- Keyboard choosing ---- */
-.comment.picked { background: var(--bg-selected); }
+.comment.picked, .thread-head.picked { background: var(--bg-selected); }
 .pick-num { min-width: 18px; text-align: center; }
 .dialog button.focused { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -7,6 +7,7 @@ A lightweight, standalone review viewer whose inline comments are shared live wi
 - File tree and read-only preview in a native window (the OS WebView; no browser or Electron)
 - Add, edit, reply to and delete comments on a line or a dragged range
 - Diff mode: pass `git diff` arguments to see only changed files, inline or side by side
+- Resolve threads you are done with; they fold away and agents skip them
 - Per-file "reviewed" checkboxes that clear themselves when the file changes again
 - Refreshes automatically while keeping the scroll position
 - Agents read and write the same comments through a CLI built into the same binary
@@ -40,6 +41,7 @@ In the viewer:
 
 - Click a line number, or drag across line numbers, to start a thread. Shift-click extends the selection. ⌘Enter (Ctrl+Enter on other platforms) submits, Esc cancels.
 - In a diff, unchanged stretches are folded; click a fold to expand it. A bar in the left margin marks each thread's lines: amber while it waits for the agent, violet once the agent replied.
+- **Resolve** at the bottom of a thread marks it done: it shrinks to one line, its margin bar turns gray, and it leaves the Waiting and Answered lists (All still shows it, with **Unresolve** to reopen it). A new reply, from you or the agent, reopens it.
 - The right panel lists threads (Waiting / Answered / All) and holds the overall comment. **Copy agent instructions** at its bottom copies what an agent needs to connect.
 - Code is syntax highlighted for common languages.
 
@@ -50,11 +52,12 @@ Keyboard (Vim-like normal mode; `?` shows all). `⌘` shortcuts use Ctrl on Linu
 | `j` `k`, `gg` `G`, `Ctrl-d` `Ctrl-u` | Move the current line (counts work: `5j`) |
 | `{` `}` | Previous / next file |
 | `[` `]` | Previous / next change |
-| `Ctrl-p` `Ctrl-n` | Previous / next thread across files, following the panel filter |
+| `Ctrl-p` `Ctrl-n` | Previous / next thread across files, following the panel filter (resolved threads only under All) |
 | `V` | Select lines |
 | `a` | Add a thread on the current line or selection |
 | `r` `e` `x` `dd` | On the current line's thread: reply / edit a comment / delete a comment / delete the whole thread (several threads or comments are numbered to choose) |
-| `zo` `zc` `zR` `zm` | Show / hide the thread on the current line; show / hide all |
+| `s` | Resolve the current line's thread, or reopen a resolved one |
+| `zo` `zc` `zR` `zm` | Show / hide the thread on the current line (a resolved thread expands first); show / hide all |
 | `Space` | Toggle reviewed for the file |
 | `/` or `⌘F`, then `n` `p` | Find in file; Enter accepts, `n` / `p` step through matches |
 | `⌘E` | Go to file (fuzzy) |
@@ -66,18 +69,20 @@ Comments always belong to lines of the current file; the diff is only a visual a
 Use **Copy Agent Instructions** and paste the result into the agent's chat. Agents use the same executable:
 
 ```text
-review-relay comments list [--path PATH]
+review-relay comments list [--path PATH] [--unresolved]
 review-relay comments add --path PATH --line N [--end-line N] --body TEXT
 review-relay comments reply COMMENT_ID --path PATH --line N [--end-line N] --body TEXT
+review-relay comments resolve COMMENT_ID
+review-relay comments unresolve COMMENT_ID
 review-relay comments remove COMMENT_ID
 review-relay comments clear
 review-relay navigate --comment COMMENT_ID
 review-relay navigate --path PATH --line N [--end-line N]
 ```
 
-The CLI finds the running viewer from the current directory (or `--workspace`). Paths are relative to the workspace root and line numbers are zero-based. A reply moves its whole thread to the given location.
+The CLI finds the running viewer from the current directory (or `--workspace`). Paths are relative to the workspace root and line numbers are zero-based. A reply moves its whole thread to the given location and reopens it if it was resolved. A resolved thread's root comment has `"resolved": true`; `--unresolved` lists only open threads.
 
-The HTTP API (`/health`, `/v1/comments`, `/v1/comments/:id/replies`, `/v1/navigate`) listens only on `127.0.0.1` and rejects requests from other browser origins or with a foreign `Host` header.
+The HTTP API (`/health`, `/v1/comments`, `/v1/comments/:id/replies`, `/v1/comments/:id/resolved`, `/v1/navigate`) listens only on `127.0.0.1` and rejects requests from other browser origins or with a foreign `Host` header.
 
 ## Data
 

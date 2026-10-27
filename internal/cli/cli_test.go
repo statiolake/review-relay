@@ -57,6 +57,15 @@ func TestCommandsBuildRequests(t *testing.T) {
 	if err := run("navigate", "--comment", "ID"); err != nil {
 		t.Fatal(err)
 	}
+	if err := run("comments", "resolve", "ID"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("comments", "unresolve", "ID"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run("comments", "list", "--unresolved", "--path", "a.go"); err != nil {
+		t.Fatal(err)
+	}
 	got := *calls
 	if got[0].path != "/v1/comments" || got[0].body["endLine"] != float64(4) || got[0].body["source"] != "agent" {
 		t.Errorf("add: %+v", got[0])
@@ -70,6 +79,15 @@ func TestCommandsBuildRequests(t *testing.T) {
 	if got[3].body["commentId"] != "ID" {
 		t.Errorf("navigate: %+v", got[3])
 	}
+	if got[4].method != "PUT" || got[4].path != "/v1/comments/ID/resolved" || got[4].body["resolved"] != true {
+		t.Errorf("resolve: %+v", got[4])
+	}
+	if got[5].path != "/v1/comments/ID/resolved" || got[5].body["resolved"] != false {
+		t.Errorf("unresolve: %+v", got[5])
+	}
+	if got[6].path != "/v1/comments?path=a.go&resolved=false" {
+		t.Errorf("list --unresolved: %+v", got[6])
+	}
 
 	for _, bad := range [][]string{
 		{"comments", "add", "--path", "a"},
@@ -77,6 +95,8 @@ func TestCommandsBuildRequests(t *testing.T) {
 		{"navigate", "--comment", "ID", "--line", "2"},
 		{"navigate"},
 		{"comments", "list", "stray"},
+		{"comments", "resolve"},
+		{"comments", "unresolve", "ID", "extra"},
 		{"bogus"},
 	} {
 		if err := run(bad...); err == nil {

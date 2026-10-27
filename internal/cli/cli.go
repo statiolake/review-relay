@@ -29,9 +29,11 @@ const Usage = `Agent commands (talk to the running viewer):
   --endpoint or REVIEW_RELAY_ENDPOINT skips discovery.
 
   health
-  comments list [--path PATH]
+  comments list [--path PATH] [--unresolved]
   comments add --path PATH --line N [--end-line N] --body TEXT [--author NAME]
   comments reply COMMENT_ID --path PATH --line N [--end-line N] --body TEXT [--author NAME]
+  comments resolve COMMENT_ID
+  comments unresolve COMMENT_ID
   comments remove COMMENT_ID
   comments clear
   navigate --comment COMMENT_ID
@@ -86,20 +88,28 @@ func Run(args []string, out io.Writer) error {
 
 func (c client) comments(args []string) error {
 	if len(args) == 0 {
-		return errors.New("comments requires list, add, reply, remove, or clear")
+		return errors.New("comments requires list, add, reply, resolve, unresolve, remove, or clear")
 	}
 	switch args[0] {
 	case "list":
 		flags := newFlags("comments list")
 		p := flags.String("path", "", "")
+		unresolved := flags.Bool("unresolved", false, "")
 		if err := parse(flags, args[1:]); err != nil {
 			return err
 		}
-		query := ""
+		query := url.Values{}
 		if *p != "" {
-			query = "?path=" + url.QueryEscape(*p)
+			query.Set("path", *p)
 		}
-		return c.request(http.MethodGet, "/v1/comments"+query, nil)
+		if *unresolved {
+			query.Set("resolved", "false")
+		}
+		suffix := ""
+		if len(query) > 0 {
+			suffix = "?" + query.Encode()
+		}
+		return c.request(http.MethodGet, "/v1/comments"+suffix, nil)
 	case "add":
 		flags := newFlags("comments add")
 		payload := locationFlags(flags, true)
@@ -125,6 +135,11 @@ func (c client) comments(args []string) error {
 			return fmt.Errorf("comments reply: %w", err)
 		}
 		return c.request(http.MethodPost, "/v1/comments/"+url.PathEscape(args[1])+"/replies", body)
+	case "resolve", "unresolve":
+		if len(args) != 2 {
+			return fmt.Errorf("comments %s requires a comment ID", args[0])
+		}
+		return c.request(http.MethodPut, "/v1/comments/"+url.PathEscape(args[1])+"/resolved", map[string]any{"resolved": args[0] == "resolve"})
 	case "remove":
 		if len(args) != 2 {
 			return errors.New("comments remove requires a comment ID")

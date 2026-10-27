@@ -115,6 +115,33 @@ func TestCommentLifecycleAndErrors(t *testing.T) {
 			t.Errorf("%s %s: no error message", c.method, c.path)
 		}
 	}
+	if code, out := do(t, ts, "PUT", "/v1/comments/"+id+"/resolved", `{"resolved":true}`, nil); code != 200 || out["comment"].(map[string]any)["resolved"] != true {
+		t.Fatalf("resolve: %d %v", code, out)
+	}
+	if _, out := do(t, ts, "GET", "/v1/comments?resolved=false", "", nil); len(out["comments"].([]any)) != 0 {
+		t.Fatalf("unresolved filter kept a resolved thread: %v", out)
+	}
+	if _, out := do(t, ts, "GET", "/v1/comments?resolved=true", "", nil); len(out["comments"].([]any)) != 2 {
+		t.Fatalf("resolved filter: %v", out)
+	}
+	for _, c := range []struct {
+		body string
+		want int
+	}{{`{}`, 400}, {`{"resolved":"yes"}`, 400}} {
+		if code, _ := do(t, ts, "PUT", "/v1/comments/"+id+"/resolved", c.body, nil); code != c.want {
+			t.Errorf("resolve %s: %d, want %d", c.body, code, c.want)
+		}
+	}
+	if code, _ := do(t, ts, "GET", "/v1/comments?resolved=maybe", "", nil); code != 400 {
+		t.Errorf("bad resolved filter: %d", code)
+	}
+	if code, _ := do(t, ts, "PUT", "/v1/comments/00000000-0000-4000-8000-000000000000/resolved", `{"resolved":true}`, nil); code != 404 {
+		t.Errorf("resolve missing: %d", code)
+	}
+	if code, out := do(t, ts, "PUT", "/v1/comments/"+id+"/resolved", `{"resolved":false}`, nil); code != 200 || out["comment"].(map[string]any)["resolved"] != nil {
+		t.Fatalf("unresolve: %d %v", code, out)
+	}
+
 	code, out = do(t, ts, "GET", "/v1/comments?path=a.txt", "", nil)
 	comments := out["comments"].([]any)
 	if code != 200 || len(comments) != 2 || comments[0].(map[string]any)["line"].(float64) != 2 {
