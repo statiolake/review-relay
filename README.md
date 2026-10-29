@@ -19,7 +19,7 @@ A lightweight, standalone review viewer whose inline comments are shared live wi
 go install github.com/statiolake/review-relay@latest
 ```
 
-The WebView binding uses cgo, so a C toolchain is required (Xcode Command Line Tools on macOS; `gcc` and `libwebkit2gtk-4.1-dev` on Linux; MinGW-w64 on Windows).
+The window uses cgo, so a C toolchain is required (Xcode Command Line Tools on macOS, where the app talks to Cocoa and WKWebView directly; `gcc`, `libgtk-3-dev` and `libwebkit2gtk-4.0-dev` on Linux; MinGW-w64 on Windows).
 
 ## Usage
 
@@ -35,7 +35,24 @@ Arguments are passed to `git diff` unchanged. When the diff's new side is the wo
 | Option | Description |
 | --- | --- |
 | `--devtools` | Enable the web inspector |
-| `--no-window` | Do not open a window; print the URL to open in a browser |
+| `--wait` | Return only once the review's window has closed (macOS; see below) |
+| `--no-window` | Do not open a window; print the URL to open in a browser (every platform; no app involved) |
+
+### macOS: one resident app
+
+On macOS every review is a window of one Review Relay app:
+
+- The first `review-relay` starts the app in the background, detached from the terminal (closing the terminal does not close it), opens the review's window and returns. Later invocations hand their review to the running app and return at once.
+- Each review (workspace root + `git diff` arguments) has its own window, titled with the repository name and the diff. Running the same review again, from anywhere in the repository and with equivalent arguments (`--staged` = `--cached`, a trailing `--` is ignored), brings its window forward instead of opening another one. One workspace holds one review, so a different diff of an already open workspace is refused (its window comes forward); close that window first.
+- `--wait` blocks until the review's window closes (also by quitting the app) and exits 0, or non-zero if the app died. Use it as an editor-style hook, e.g. in a script that continues once you are done.
+- ⌘W closes the review's window: the review stops and agents no longer find it. Its comments are stored, so opening it again restores them. ⌘Q quits the app and every review.
+- Closing the last window leaves the app in the Dock. Clicking the Dock icon then reopens the most recent review; **File > Open Recent** lists the last ten.
+- Window positions and sizes are remembered per review.
+- Each request carries the invoking shell's directory and its `GIT_*` variables (e.g. `GIT_DIR`, `GIT_WORK_TREE`), so the app runs git as that shell would.
+- If the running app is another build (you updated the binary), an app with no windows open quits and the new binary starts in its place; an app with windows keeps serving and prints a note to quit it (⌘Q) to pick up the new build. An app too old to understand the request asks you to quit it.
+- The app listens on `$TMPDIR/review-relay-<uid>/app.sock` (a directory only you can read) and logs to `app.log` next to it.
+
+On Linux and Windows each `review-relay` is its own window and the command returns when that window closes, as before; `--wait` is accepted and changes nothing.
 
 In the viewer:
 
@@ -63,6 +80,8 @@ Keyboard (Vim-like normal mode; `?` shows all). `⌘` shortcuts use Ctrl on Linu
 | `⌘E` | Go to file (fuzzy) |
 
 Comments always belong to lines of the current file; the diff is only a visual aid. Only one viewer runs per workspace.
+
+App shortcuts on macOS: ⌘W closes the review, ⌘Q quits Review Relay, ⌘M minimizes; File > Open Recent reopens a past review.
 
 ## Connect a coding agent
 
