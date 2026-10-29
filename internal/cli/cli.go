@@ -19,7 +19,7 @@ import (
 )
 
 // Commands are the first arguments that select CLI mode.
-var Commands = []string{"health", "comments", "navigate"}
+var Commands = []string{"health", "comments", "navigate", "completion"}
 
 // Usage describes the agent commands.
 const Usage = `Agent commands (talk to the running viewer):
@@ -38,6 +38,7 @@ const Usage = `Agent commands (talk to the running viewer):
   comments clear
   navigate --comment COMMENT_ID
   navigate --path PATH --line N [--end-line N]
+  completion zsh
 
   PATH is relative to the workspace root; line numbers are zero-based.`
 
@@ -59,6 +60,12 @@ func Run(args []string, out io.Writer) error {
 	rest := root.Args()
 	if len(rest) == 0 {
 		return errors.New(Usage)
+	}
+	if rest[0] == "completion" {
+		if len(rest) != 2 {
+			return errors.New("usage: review-relay completion zsh")
+		}
+		return WriteCompletion(out, rest[1])
 	}
 	resolved := *endpoint
 	if resolved == "" {

@@ -30,6 +30,14 @@ review-relay main...HEAD  # review a branch
 review-relay --           # plain `git diff` (unstaged changes)
 ```
 
+### zsh completion
+
+```sh
+eval "$(review-relay completion zsh)"   # after compinit, e.g. in ~/.zshrc
+```
+
+Flags and agent commands are completed by review-relay itself; everything else is completed by zsh's bundled git completion as `git diff` (revisions, `X..Y`/`X...Y`, `--cached`, `--` pathspecs).
+
 Arguments are passed to `git diff` unchanged. When the diff's new side is the work tree, untracked files are listed as added.
 
 | Option | Description |

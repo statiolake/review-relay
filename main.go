@@ -56,7 +56,10 @@ func run(args []string) error {
 		return cli.Run(args, os.Stdout)
 	}
 
-	opts := map[string]bool{"--devtools": false, "--no-window": false, "--wait": false}
+	opts := map[string]bool{}
+	for _, f := range cli.ViewerOptions {
+		opts["--"+f.Name] = false
+	}
 	for len(args) > 0 {
 		if _, ok := opts[args[0]]; !ok {
 			break
