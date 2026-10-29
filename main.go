@@ -4,24 +4,16 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 
-	webview "github.com/webview/webview_go"
-
+	"github.com/statiolake/review-relay/internal/app"
 	"github.com/statiolake/review-relay/internal/cli"
-	"github.com/statiolake/review-relay/internal/review"
-	"github.com/statiolake/review-relay/internal/server"
-	"github.com/statiolake/review-relay/internal/session"
-	"github.com/statiolake/review-relay/internal/workspace"
 )
 
 const usage = `Usage:
@@ -30,7 +22,13 @@ const usage = `Usage:
 
   Options:
     --devtools    enable the web inspector
+    --wait        return only once the review's window has closed (macOS; the
+                  window always blocks elsewhere)
     --no-window   do not open a window; print the viewer URL to open in a browser
+
+  On macOS one resident app shows every review: the first invocation starts
+  it, and each invocation opens (or brings forward) its review's window and
+  returns at once.
 
   Examples:
     review-relay HEAD~          changes since the previous commit, including uncommitted work
@@ -51,11 +49,14 @@ func run(args []string) error {
 		fmt.Println(usage)
 		return nil
 	}
+	if len(args) == 1 && args[0] == app.ResidentFlag {
+		return runResident()
+	}
 	if isAgentCommand(args) {
 		return cli.Run(args, os.Stdout)
 	}
 
-	opts := map[string]bool{"--devtools": false, "--no-window": false}
+	opts := map[string]bool{"--devtools": false, "--no-window": false, "--wait": false}
 	for len(args) > 0 {
 		if _, ok := opts[args[0]]; !ok {
 			break
@@ -70,7 +71,10 @@ func run(args []string) error {
 			diffArgs = args[1:]
 		}
 	}
-	return view(opts["--devtools"], !opts["--no-window"], diffArgs)
+	if opts["--no-window"] {
+		return serve(diffArgs)
+	}
+	return openWindow(opts["--devtools"], opts["--wait"], diffArgs)
 }
 
 // isAgentCommand reports whether args, after the agent's global flags, start
@@ -91,91 +95,32 @@ func isAgentCommand(args []string) bool {
 	return false
 }
 
-func view(devtools, window bool, diffArgs []string) error {
+// startReview opens the review of the current directory in this process.
+func startReview(diffArgs []string) (*app.Review, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	ws, err := workspace.Open(cwd, diffArgs)
+	ws, _, err := app.Resolve(cwd, diffArgs, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if _, root, err := session.Find(ws.Root); err == nil && root == ws.Root {
-		return fmt.Errorf("a viewer for %s is already running", ws.Root)
-	}
-
-	dataDir, err := dataDir(ws.Root)
-	if err != nil {
-		return err
-	}
-	store, err := review.Open(filepath.Join(dataDir, "state.json"))
-	if err != nil {
-		return fmt.Errorf("%w\nmove the file away to start with an empty review", err)
-	}
-	prefs, err := server.OpenPrefs(filepath.Join(dataDir, "viewer.json"))
-	if err != nil {
-		return fmt.Errorf("%w\nmove the file away to reset the viewer state", err)
-	}
-	exe, err := os.Executable()
-	if err != nil {
-		return err
-	}
-
-	srv := server.New(ws, store, prefs, exe)
-	endpoint, serve, err := srv.Listen()
-	if err != nil {
-		return err
-	}
-	reg, err := session.Register(ws.Root, endpoint)
-	if err != nil {
-		return err
-	}
-
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
-	if !window {
-		fmt.Println(endpoint + "/")
-		failed := make(chan error, 1)
-		go func() { failed <- fmt.Errorf("server stopped: %w", serve()) }()
-		var fatal error
-		select {
-		case fatal = <-failed:
-		case <-signals:
-		}
-		return errors.Join(fatal, reg.Close())
-	}
-
-	w := webview.New(devtools)
-	defer w.Destroy()
-	title := "Review Relay — " + filepath.Base(ws.Root)
-	if ws.DiffMode() {
-		title += " — git diff " + strings.Join(diffArgs, " ")
-	}
-	w.SetTitle(title)
-	w.SetSize(1400, 900, webview.HintNone)
-	setupNative(w.Window())
-	w.Navigate(endpoint + "/")
-
-	var fatal error
-	stop := func(err error) {
-		w.Dispatch(func() {
-			fatal = err
-			w.Terminate()
-		})
-	}
-	go func() { stop(fmt.Errorf("server stopped: %w", serve())) }()
-	go func() { <-signals; stop(nil) }()
-	w.Run()
-	return errors.Join(fatal, reg.Close())
+	return app.Start(ws)
 }
 
-// dataDir is where a workspace's review lives, outside the workspace so that
-// it never ends up in a commit.
-func dataDir(root string) (string, error) {
-	config, err := os.UserConfigDir()
+// serve runs the viewer without a window until interrupted (--no-window).
+func serve(diffArgs []string) error {
+	r, err := startReview(diffArgs)
 	if err != nil {
-		return "", err
+		return err
 	}
-	sum := sha256.Sum256([]byte(root))
-	return filepath.Join(config, "review-relay", "workspaces", hex.EncodeToString(sum[:8])), nil
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	fmt.Println(r.URL())
+	var fatal error
+	select {
+	case fatal = <-r.Failed():
+	case <-signals:
+	}
+	return errors.Join(fatal, r.Close())
 }
