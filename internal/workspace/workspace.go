@@ -29,11 +29,20 @@ type Workspace struct {
 	// includeUntracked is set when the diff's new side is the work tree, so
 	// files git does not know yet are shown as added.
 	includeUntracked bool
+	// env is added to git's environment (e.g. GIT_DIR), so a long-running
+	// process can serve requests made from shells with different settings.
+	env []string
 }
 
 // Open resolves the workspace containing dir. diffArgs == nil selects plain
 // file mode; a non-nil (possibly empty) slice selects diff mode.
 func Open(dir string, diffArgs []string) (*Workspace, error) {
+	return OpenEnv(dir, diffArgs, nil)
+}
+
+// OpenEnv is Open with extra environment variables ("KEY=value") for every
+// git command, overriding this process's own.
+func OpenEnv(dir string, diffArgs []string, env []string) (*Workspace, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -42,8 +51,8 @@ func Open(dir string, diffArgs []string) (*Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	w := &Workspace{Root: abs}
-	top, err := runGit(abs, "rev-parse", "--show-toplevel")
+	w := &Workspace{Root: abs, env: slices.Clone(env)}
+	top, err := w.runGit(abs, "rev-parse", "--show-toplevel")
 	if err == nil {
 		w.Root, err = filepath.EvalSymlinks(strings.TrimSpace(string(top)))
 		if err != nil {
@@ -60,7 +69,7 @@ func Open(dir string, diffArgs []string) (*Workspace, error) {
 	w.DiffArgs = slices.Clone(diffArgs)
 	w.includeUntracked = comparesWithWorkTree(diffArgs)
 	// Validate the arguments once up front so a typo fails at startup.
-	if _, err := runGit(w.Root, w.diffCommand("--raw")...); err != nil {
+	if _, err := w.runGit(w.Root, w.diffCommand("--raw")...); err != nil {
 		return nil, err
 	}
 	return w, nil
@@ -121,7 +130,7 @@ func (w *Workspace) Files() ([]Entry, error) {
 }
 
 func (w *Workspace) gitFiles() ([]Entry, error) {
-	out, err := runGit(w.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
+	out, err := w.runGit(w.Root, "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate")
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +167,7 @@ func (w *Workspace) walkFiles() ([]Entry, error) {
 }
 
 func (w *Workspace) changedFiles() ([]Entry, error) {
-	out, err := runGit(w.Root, w.diffCommand("--raw", "-z", "--no-abbrev")...)
+	out, err := w.runGit(w.Root, w.diffCommand("--raw", "-z", "--no-abbrev")...)
 	if err != nil {
 		return nil, err
 	}
@@ -218,7 +227,7 @@ func (w *Workspace) changedFiles() ([]Entry, error) {
 
 func (w *Workspace) untracked() ([]string, error) {
 	args := append([]string{"ls-files", "-z", "--others", "--exclude-standard", "--"}, w.userPathspec()...)
-	out, err := runGit(w.Root, args...)
+	out, err := w.runGit(w.Root, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +335,7 @@ func (w *Workspace) diffView(e Entry) (View, error) {
 	// Replace the user's pathspec, if any, with exactly this file's paths.
 	args := []string{"-c", "core.quotePath=false", "diff", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "-U2147483647"}
 	args = append(append(append(args, w.revisionArgs()...), "--"), pathspec...)
-	out, err := runGit(w.Root, args...)
+	out, err := w.runGit(w.Root, args...)
 	if err != nil {
 		return View{}, err
 	}
@@ -358,7 +367,7 @@ func (w *Workspace) diffView(e Entry) (View, error) {
 }
 
 func (w *Workspace) tracked(p string) bool {
-	_, err := runGit(w.Root, "ls-files", "--error-unmatch", "--", ":(literal)"+p)
+	_, err := w.runGit(w.Root, "ls-files", "--error-unmatch", "--", ":(literal)"+p)
 	return err == nil
 }
 
@@ -501,8 +510,11 @@ func splitZ(out []byte) []string {
 	return strings.Split(s, "\x00")
 }
 
-func runGit(dir string, args ...string) ([]byte, error) {
+func (w *Workspace) runGit(dir string, args ...string) ([]byte, error) {
 	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	if len(w.env) > 0 {
+		cmd.Env = append(os.Environ(), w.env...)
+	}
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

@@ -31,7 +31,8 @@ type Server struct {
 	prefs   *Prefs
 	cliPath string
 
-	addr string // host:port once listening
+	addr string       // host:port once listening
+	http *http.Server // set by Listen
 
 	mu      sync.Mutex
 	clients map[chan event]struct{}
@@ -57,7 +58,17 @@ func (s *Server) Listen() (endpoint string, serve func() error, err error) {
 		return "", nil, err
 	}
 	s.addr = ln.Addr().String()
-	return "http://" + s.addr, func() error { return http.Serve(ln, s.Handler()) }, nil
+	s.http = &http.Server{Handler: s.Handler()}
+	return "http://" + s.addr, func() error { return s.http.Serve(ln) }, nil
+}
+
+// Close stops serving and drops every connection, including the page's event
+// stream; serve then returns http.ErrServerClosed.
+func (s *Server) Close() error {
+	if s.http == nil {
+		return nil
+	}
+	return s.http.Close()
 }
 
 // Endpoint is the base URL; valid after Listen.

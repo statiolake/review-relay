@@ -202,3 +202,23 @@ func TestSplitLines(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenEnvReachesGit(t *testing.T) {
+	r := repo(t)
+	tree := t.TempDir() // not a repository on its own
+	write(t, tree, "edit.txt", "a\nB\nc\n")
+	w, err := OpenEnv(tree, []string{"HEAD"}, []string{"GIT_DIR=" + filepath.Join(r, ".git"), "GIT_WORK_TREE=" + tree})
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := w.Files()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(files, func(e Entry) bool { return e.Path == "edit.txt" }) {
+		t.Fatalf("files = %v", files)
+	}
+	if _, err := Open(tree, []string{"HEAD"}); err == nil {
+		t.Fatal("without the environment the tree is not a repository")
+	}
+}
