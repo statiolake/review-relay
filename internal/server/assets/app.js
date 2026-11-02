@@ -14,13 +14,14 @@ const state = {
   session: null,
   files: [],          // [{path, oldPath, status, hash}]
   filesKey: '',
-  reviewed: {},       // path -> hash
+  reviewed: {},       // path -> content id when marked reviewed
   comments: [],
   overall: '',
   selected: null,     // path shown in #content
   view: null,         // server View for `selected`
   renderedKey: '',    // what #content currently shows
   layout: 'split',
+  fullDiff: new Set(), // changed-since-review paths shown as the whole diff
   selection: null,    // {start, end} zero-based new-side lines
   cursor: null,       // zero-based new-side line of the current line
   cursorFold: null,   // data-key of the fold the cursor is on instead of a line
@@ -140,6 +141,7 @@ const STATE_LABEL = { waiting: 'Waiting for AI', answered: 'AI replied', resolve
 const inFilter = root => state.threadFilter === 'all' || threadState(root.id) === state.threadFilter;
 const lineLabel = (line, endLine) => line === endLine ? `L${line + 1}` : `L${line + 1}–${endLine + 1}`;
 const isReviewed = file => !!file?.hash && state.reviewed[file.path] === file.hash;
+const changedSinceReview = file => !!file?.hash && !!state.reviewed[file.path] && !isReviewed(file);
 const fileEntry = path => state.files.find(f => f.path === path);
 const typing = () => ['TEXTAREA', 'INPUT'].includes(document.activeElement?.tagName);
 const basename = path => path.slice(path.lastIndexOf('/') + 1);
@@ -189,7 +191,7 @@ async function refreshComments() {
 async function refreshView() {
   if (!state.selected) return;
   const path = state.selected;
-  const view = await api('GET', `/ui/view?path=${encodeURIComponent(path)}`);
+  const view = await api('GET', `/ui/view?path=${encodeURIComponent(path)}${state.fullDiff.has(path) ? '&full=1' : ''}`);
   if (state.selected !== path) return; // another file was opened meanwhile
   state.view = view;
   renderView();
@@ -328,7 +330,9 @@ function renderTree() {
         class: `pip ${waiting ? 'waiting' : 'answered'}`,
         title: `${threads.length} thread(s), ${waiting} waiting for AI`,
       }, String(threads.length)),
-      diff && el('span', { class: `status status-${file.status}` }, file.status)));
+      diff && (changedSinceReview(file)
+        ? el('span', { class: 'status since-review', title: 'Changed since review' }, `${file.status}•`)
+        : el('span', { class: `status status-${file.status}` }, file.status))));
     }
   };
   walk(buildTree(state.files), '', 0);
@@ -358,8 +362,31 @@ async function setReviewedMany(files, checked) {
     await api('PUT', '/ui/reviewed', { path: file.path, hash: checked ? file.hash : '' });
     if (checked) state.reviewed[file.path] = file.hash;
     else delete state.reviewed[file.path];
+    state.fullDiff.delete(file.path);
   }
   renderTree();
+  renderHeader();
+  await refreshView();
+}
+
+// Marks the open file reviewed and opens the next file still to review.
+async function markReviewedAndNext() {
+  const files = orderedFiles();
+  const index = files.findIndex(f => f.path === state.selected);
+  if (index < 0) return;
+  await setReviewed(files[index], true);
+  const next = [...files.slice(index + 1), ...files.slice(0, index)].find(f => !isReviewed(f));
+  if (next) await openFile(next.path);
+  else toast('All reviewed');
+}
+
+// Switches a changed-since-review file between those changes and the whole diff.
+async function toggleFullDiff() {
+  const file = fileEntry(state.selected);
+  if (!changedSinceReview(file)) { toast('Not changed since review'); return; }
+  if (state.fullDiff.has(file.path)) state.fullDiff.delete(file.path);
+  else state.fullDiff.add(file.path);
+  await refreshView();
   renderHeader();
 }
 
@@ -597,6 +624,7 @@ function renderHeader() {
   const view = state.view;
   let status = view?.status ? STATUS_NAMES[view.status] ?? view.status : '';
   if (view?.oldPath) status += ` from ${view.oldPath}`;
+  if (view?.sinceReview) status = 'Changed since review';
   $('#file-status').textContent = status;
 
   const stat = $('#file-stat');
@@ -606,10 +634,14 @@ function renderHeader() {
     const dels = view.lines.filter(l => l.k === '-').length;
     stat.append(el('span', { class: 'a' }, `+${adds}`), el('span', { class: 'd' }, `−${dels}`));
   }
+  const sinceToggle = $('#since-toggle');
+  sinceToggle.hidden = !changedSinceReview(fileEntry(state.selected));
+  sinceToggle.classList.toggle('active', !!view?.sinceReview);
   $('#change-nav').hidden = !view?.lines.some(l => l.k !== ' ');
   if (!path) return;
 }
 
+$('#since-toggle').addEventListener('click', toggleFullDiff);
 $('#prev-change').addEventListener('click', () => jumpToChange(-1));
 $('#next-change').addEventListener('click', () => jumpToChange(1));
 
@@ -913,6 +945,7 @@ const ICONS = {
   file: '<path d="M4 1.75h5.25l3 3v9.5H4z M9 1.75V5h3.25"/>',
   up: '<path d="M3.5 10 8 5.5l4.5 4.5"/>',
   down: '<path d="M3.5 6 8 10.5 12.5 6"/>',
+  since: '<circle cx="8" cy="8" r="5.75"/><path d="M8 4.75V8l2.25 1.5"/>',
   close: '<path d="m4 4 8 8M12 4l-8 8"/>',
   help: '<circle cx="8" cy="8" r="6.25"/><path d="M6.25 6.25a1.75 1.75 0 1 1 2.5 1.6c-.5.25-.75.6-.75 1.15v.5"/><circle cx="8" cy="11.5" r=".5" fill="currentColor" stroke="none"/>',
   panel: '<rect x="1.75" y="2.75" width="12.5" height="10.5" rx="1.5"/><path d="M10 2.75v10.5"/>',
@@ -1483,12 +1516,19 @@ $('#copy-instructions').addEventListener('click', async () => {
 $('#clear-review').addEventListener('click', async () => {
   const choice = await dialog('Start over? Deleted comments cannot be restored.', [
     { label: 'Delete comments', value: 'comments', class: 'destructive' },
+    ...(state.session.diff ? [{ label: 'Clear reviewed marks', value: 'marks' }] : []),
     { label: 'Clear everything', value: 'review', class: 'destructive' },
   ]);
+  if (choice === 'marks') await api('DELETE', '/ui/reviewed');
   if (choice === 'comments') await api('DELETE', '/v1/comments');
   if (choice === 'review') {
     await api('DELETE', '/ui/review');
     overall.value = overallSent = '';
+  }
+  if (choice === 'marks' || choice === 'review') {
+    state.fullDiff.clear();
+    await refreshFiles();
+    await refreshView();
   }
   if (choice) await refreshComments();
 });
@@ -1620,6 +1660,8 @@ document.addEventListener('keydown', event => {
       event.preventDefault(); // not a page scroll
       if (state.session.diff && index >= 0) setReviewed(files[index], !isReviewed(files[index]));
       break;
+    case 'v': if (state.session.diff) markReviewedAndNext(); break;
+    case 't': if (state.session.diff) toggleFullDiff(); break;
     case '/': event.preventDefault(); openSearch(); break;
     case '?': $('#help').hidden = false; break;
     case 'Escape':

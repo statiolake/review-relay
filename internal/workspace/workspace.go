@@ -5,6 +5,7 @@ package workspace
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -102,9 +103,24 @@ type Entry struct {
 	// Status is a git status letter (A, M, D, R, C, T, U) in diff mode, and
 	// empty in file mode.
 	Status string `json:"status,omitempty"`
-	// Hash identifies the change in diff mode; it differs whenever the change
-	// itself differs, so a "reviewed" mark can be invalidated.
+	// Hash identifies the new side's content in diff mode: its git blob id, or
+	// DeletedID. A "reviewed" mark holds while it stays the same, so moving the
+	// old side (a rebase, say) does not invalidate a review.
 	Hash string `json:"hash,omitempty"`
+	// committed is set when the new side is a git object, not the work tree.
+	committed bool
+}
+
+// DeletedID is the Hash of a file with no new side.
+const DeletedID = "deleted"
+
+// blobID is the id git gives content, so work tree files and committed files
+// compare equal when their content is.
+func blobID(content []byte) string {
+	h := sha1.New()
+	fmt.Fprintf(h, "blob %d\x00", len(content))
+	h.Write(content)
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 // Files lists the files to show in the tree, sorted by path.
@@ -194,18 +210,19 @@ func (w *Workspace) changedFiles() ([]Entry, error) {
 			e.Path = fields[i+1]
 			i += 2
 		}
-		h := sha256.New()
-		h.Write([]byte(fields[i-1] + "\x00" + strings.Join(meta, " ")))
-		// git reports an all-zero object id for the work tree side; hash the
-		// file itself so that edits change the hash.
-		if strings.Trim(meta[3], "0") == "" && status != "D" {
+		switch {
+		case status == "D":
+			e.Hash = DeletedID
+		case strings.Trim(meta[3], "0") != "":
+			e.Hash, e.committed = meta[3], true
+		default:
+			// git reports an all-zero object id for the work tree side.
 			content, err := os.ReadFile(w.abs(e.Path))
 			if err != nil {
 				return nil, err
 			}
-			h.Write(content)
+			e.Hash = blobID(content)
 		}
-		e.Hash = hex.EncodeToString(h.Sum(nil))[:16]
 		entries = append(entries, e)
 	}
 	if w.includeUntracked {
@@ -218,8 +235,7 @@ func (w *Workspace) changedFiles() ([]Entry, error) {
 			if err != nil {
 				return nil, err
 			}
-			sum := sha256.Sum256(append([]byte("untracked\x00"), content...))
-			entries = append(entries, Entry{Path: p, Status: "A", Hash: hex.EncodeToString(sum[:])[:16]})
+			entries = append(entries, Entry{Path: p, Status: "A", Hash: blobID(content)})
 		}
 	}
 	return entries, nil
@@ -265,6 +281,9 @@ type View struct {
 	Path    string `json:"path"`
 	Status  string `json:"status,omitempty"`
 	OldPath string `json:"oldPath,omitempty"`
+	// SinceReview is set when Lines compare with the reviewed snapshot rather
+	// than the diff's old side.
+	SinceReview bool `json:"sinceReview,omitempty"`
 	// Notice explains why Lines is empty or incomplete (binary, too large...).
 	Notice string `json:"notice,omitempty"`
 	Lines  []Line `json:"lines"`
@@ -279,13 +298,121 @@ func (w *Workspace) View(p string) (View, error) {
 	if err != nil {
 		return View{}, err
 	}
+	return withVersion(v), nil
+}
+
+// Changed finds path among the files of the diff.
+func (w *Workspace) Changed(p string) (Entry, bool, error) {
+	entries, err := w.Files()
+	if err != nil || !w.DiffMode() {
+		return Entry{}, false, err
+	}
+	i := slices.IndexFunc(entries, func(e Entry) bool { return e.Path == p })
+	if i < 0 {
+		return Entry{}, false, nil
+	}
+	return entries[i], true, nil
+}
+
+// NewContent reads the new side of a changed file; a deleted file has none.
+func (w *Workspace) NewContent(e Entry) ([]byte, error) {
+	switch {
+	case e.Hash == DeletedID:
+		return nil, nil
+	case e.committed:
+		return w.runGit(w.Root, "cat-file", "blob", e.Hash)
+	default:
+		return os.ReadFile(w.abs(e.Path))
+	}
+}
+
+// SinceView renders a changed file against the snapshot taken when it was
+// reviewed. New line numbers are the file's own, as in every other view.
+func (w *Workspace) SinceView(e Entry, snapshot []byte) (View, error) {
+	v := View{Path: e.Path, Status: e.Status, OldPath: e.OldPath, SinceReview: true, Lines: []Line{}}
+	current, err := w.NewContent(e)
+	if err != nil {
+		return View{}, err
+	}
+	dir, err := os.MkdirTemp("", "review-relay-since-")
+	if err != nil {
+		return View{}, err
+	}
+	defer os.RemoveAll(dir)
+	before, after := filepath.Join(dir, "before"), filepath.Join(dir, "after")
+	if err := os.WriteFile(before, snapshot, 0o600); err != nil {
+		return View{}, err
+	}
+	if err := os.WriteFile(after, current, 0o600); err != nil {
+		return View{}, err
+	}
+	out, err := w.compareFiles(before, after)
+	if err != nil {
+		return View{}, err
+	}
+	if len(out) > 4*MaxFileSize {
+		v.Notice = "Diff is too large to display."
+		return withVersion(v), nil
+	}
+	lines, binary, err := ParseUnified(out)
+	if err != nil {
+		return View{}, fmt.Errorf("%s: %w", e.Path, err)
+	}
+	if binary {
+		v.Notice = "Binary file."
+		return withVersion(v), nil
+	}
+	v.Lines = lines
+	return withVersion(v), nil
+}
+
+// compareFiles runs git diff --no-index, whose exit status 1 means "differ".
+func (w *Workspace) compareFiles(before, after string) ([]byte, error) {
+	args := []string{"diff", "--no-index", "--no-color", "--no-ext-diff", "--no-textconv", "-U2147483647", "--", before, after}
+	out, err := w.runGit(w.Root, args...)
+	var exit *exec.ExitError
+	if errors.As(err, &exit) && exit.ExitCode() == 1 {
+		return out, nil
+	}
+	return out, err
+}
+
+// DetectBaseBranch finds what a branch is compared against: the default branch
+// of the upstream or origin remote, else a local main or master.
+func DetectBaseBranch(dir string) (string, error) {
+	w := &Workspace{}
+	exists := func(ref string) bool {
+		_, err := w.runGit(dir, "rev-parse", "--verify", "--quiet", ref+"^{commit}")
+		return err == nil
+	}
+	for _, remote := range []string{"upstream", "origin"} {
+		if head, err := w.runGit(dir, "symbolic-ref", "--quiet", "--short", "refs/remotes/"+remote+"/HEAD"); err == nil {
+			if name := strings.TrimSpace(string(head)); exists(name) {
+				return name, nil
+			}
+		}
+		for _, name := range []string{"main", "master"} {
+			if exists("refs/remotes/" + remote + "/" + name) {
+				return remote + "/" + name, nil
+			}
+		}
+	}
+	for _, name := range []string{"main", "master"} {
+		if exists("refs/heads/" + name) {
+			return name, nil
+		}
+	}
+	return "", errors.New("could not find a base branch; use --merge-base BASE to name one")
+}
+
+func withVersion(v View) View {
 	h := sha256.New()
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00", v.Path, v.Status, v.OldPath, v.Notice)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%t\x00", v.Path, v.Status, v.OldPath, v.Notice, v.SinceReview)
 	for _, l := range v.Lines {
 		fmt.Fprintf(h, "%s%d,%d\x00%s\x00", l.Kind, l.Old, l.New, l.Text)
 	}
 	v.Version = hex.EncodeToString(h.Sum(nil))[:16]
-	return v, nil
+	return v
 }
 
 func (w *Workspace) view(p string) (View, error) {
@@ -519,7 +646,7 @@ func (w *Workspace) runGit(dir string, args ...string) ([]byte, error) {
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
+		return out, fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(stderr.String()))
 	}
 	return out, nil
 }

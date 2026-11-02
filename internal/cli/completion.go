@@ -18,6 +18,7 @@ type Flag struct {
 // ViewerOptions are the flags of the viewer form (main.go).
 var ViewerOptions = []Flag{
 	{Name: "devtools", Desc: "enable the web inspector"},
+	{Name: "branch", Desc: "view everything this branch changes"},
 	{Name: "wait", Desc: "return only once the review's window has closed"},
 	{Name: "no-window", Desc: "do not open a window; print the viewer URL"},
 }
@@ -193,7 +194,7 @@ _review-relay() {
   # Viewer form: review-relay [OPTIONS] [--] DIFF-ARGS, completed as git diff.
   local j viewer_opts=1
   for (( j = 2; j < CURRENT; j++ )); do
-    [[ ${words[j]} == -(devtools|wait|no-window|-devtools|-wait|-no-window) ]] || { viewer_opts=0; break; }
+    [[ ${words[j]} == -(devtools|branch|wait|no-window|-devtools|-branch|-wait|-no-window) ]] || { viewer_opts=0; break; }
   done
   if (( i == CURRENT )) && [[ ${words[CURRENT]} != -* ]]; then
     _describe -t commands 'agent command' top_cmds

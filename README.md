@@ -8,7 +8,7 @@ A lightweight, standalone review viewer whose inline comments are shared live wi
 - Add, edit, reply to and delete comments on a line or a dragged range
 - Diff mode: pass `git diff` arguments to see only changed files, inline or side by side
 - Resolve threads you are done with; they fold away and agents skip them
-- Per-file "reviewed" checkboxes that clear themselves when the file changes again
+- Per-file "reviewed" checkboxes; a file that changes afterwards shows only what changed since you reviewed it
 - Refreshes automatically while keeping the scroll position
 - Agents read and write the same comments through a CLI built into the same binary
 - Follows the OS light / dark appearance
@@ -43,8 +43,17 @@ Arguments are passed to `git diff` unchanged. When the diff's new side is the wo
 | Option | Description |
 | --- | --- |
 | `--devtools` | Enable the web inspector |
+| `--branch` | View everything the branch changes, uncommitted work included (see below) |
 | `--wait` | Return only once the review's window has closed (macOS; see below) |
 | `--no-window` | Do not open a window; print the URL to open in a browser (every platform; no app involved) |
+
+`review-relay --branch` reviews everything the branch changes, uncommitted work included: `git diff --merge-base` with the default branch of `upstream` or `origin`, else a local `main` or `master`.
+
+### Reviewing changes incrementally
+
+Marking a file reviewed saves a snapshot of its new side. If the file changes later it is unticked, shown with an amber `M•`, and opens as **snapshot → current**: only what changed since you reviewed it. `t` or the clock button switches to the whole diff and back, and ticking the file again reviews it at its new state. If the same content comes back, the mark returns. Line numbers and comments stay those of the current file in both views.
+
+Each diff has its own marks (`--staged` and `--cached` count as the same diff). Moving the old side, for example by rebasing, does not invalidate a mark as long as the file's content is the same. The trash button can clear the current diff's marks.
 
 ### macOS: one resident app
 
@@ -84,6 +93,8 @@ Keyboard (Vim-like normal mode; `?` shows all). `⌘` shortcuts use Ctrl on Linu
 | `s` | Resolve the current line's thread, or reopen a resolved one |
 | `zo` `zc` `zR` `zm` | Show / hide the thread on the current line (a resolved thread expands first); show / hide all |
 | `Space` | Toggle reviewed for the file |
+| `v` | Mark reviewed and open the next file to review |
+| `t` | On a file changed since review: those changes / the whole diff |
 | `/` or `⌘F`, then `n` `p` | Find in file; Enter accepts, `n` / `p` step through matches |
 | `⌘E` | Go to file (fuzzy) |
 

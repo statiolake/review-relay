@@ -49,7 +49,7 @@ func TestCompletionCoversFlags(t *testing.T) {
 			t.Errorf("script lacks %q", n)
 		}
 	}
-	for _, f := range []string{"--devtools", "--wait", "--no-window"} {
+	for _, f := range []string{"--devtools", "--branch", "--wait", "--no-window"} {
 		if !strings.Contains(s, f) {
 			t.Errorf("script lacks %s", f)
 		}

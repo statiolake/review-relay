@@ -222,3 +222,65 @@ func TestOpenEnvReachesGit(t *testing.T) {
 		t.Fatal("without the environment the tree is not a repository")
 	}
 }
+
+func TestSinceViewComparesWithSnapshot(t *testing.T) {
+	dir := repo(t)
+	write(t, dir, "edit.txt", "a\nb\nc\nd\n")
+	w, err := Open(dir, []string{"HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok, err := w.Changed("edit.txt")
+	if err != nil || !ok {
+		t.Fatalf("Changed = %v %v", ok, err)
+	}
+	v, err := w.SinceView(e, []byte("a\nb\nc\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []Line{{" ", 1, 1, "a"}, {" ", 2, 2, "b"}, {" ", 3, 3, "c"}, {"+", 0, 4, "d"}}
+	if !v.SinceReview || !slices.Equal(v.Lines, want) {
+		t.Fatalf("view %+v", v)
+	}
+	if v.Status != "M" {
+		t.Fatalf("status %q", v.Status)
+	}
+}
+
+func TestHashIgnoresTheOldSide(t *testing.T) {
+	dir := repo(t)
+	write(t, dir, "edit.txt", "x\n")
+	git(t, dir, "add", "-A")
+	git(t, dir, "commit", "-qm", "second")
+	committed, err := Open(dir, []string{"HEAD~..HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inTree, err := Open(dir, []string{"HEAD~"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _, _ := committed.Changed("edit.txt")
+	b, _, _ := inTree.Changed("edit.txt")
+	if a.Hash == "" || a.Hash != b.Hash {
+		t.Fatalf("hashes %q %q", a.Hash, b.Hash)
+	}
+}
+
+func TestDetectBaseBranch(t *testing.T) {
+	dir := repo(t)
+	if base, err := DetectBaseBranch(dir); err != nil || base != "main" {
+		t.Fatalf("local: %q %v", base, err)
+	}
+	git(t, dir, "update-ref", "refs/remotes/origin/develop", "HEAD")
+	git(t, dir, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/develop")
+	if base, err := DetectBaseBranch(dir); err != nil || base != "origin/develop" {
+		t.Fatalf("origin: %q %v", base, err)
+	}
+	git(t, dir, "branch", "-m", "main", "topic")
+	git(t, dir, "update-ref", "-d", "refs/remotes/origin/develop")
+	git(t, dir, "symbolic-ref", "-d", "refs/remotes/origin/HEAD")
+	if _, err := DetectBaseBranch(dir); err == nil {
+		t.Fatal("no base accepted")
+	}
+}

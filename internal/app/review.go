@@ -57,11 +57,17 @@ func Start(ws *workspace.Workspace) (*Review, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w\nmove the file away to reset the viewer state", err)
 	}
+	spec := Spec{Root: ws.Root, DiffArgs: ws.DiffArgs}
+	specSum := sha256.Sum256([]byte(spec.Key()))
+	marks, err := server.OpenMarks(filepath.Join(dir, "reviews", hex.EncodeToString(specSum[:8])))
+	if err != nil {
+		return nil, fmt.Errorf("%w\nmove the file away to forget this diff's reviewed marks", err)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		return nil, err
 	}
-	srv := server.New(ws, store, prefs, exe)
+	srv := server.New(ws, store, prefs, marks, exe)
 	endpoint, serve, err := srv.Listen()
 	if err != nil {
 		return nil, err
@@ -72,7 +78,7 @@ func Start(ws *workspace.Workspace) (*Review, error) {
 		return nil, err
 	}
 	r := &Review{
-		Spec:     Spec{Root: ws.Root, DiffArgs: ws.DiffArgs},
+		Spec:     spec,
 		Endpoint: endpoint,
 		srv:      srv,
 		reg:      reg,

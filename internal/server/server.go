@@ -29,6 +29,7 @@ type Server struct {
 	ws      *workspace.Workspace
 	store   *review.Store
 	prefs   *Prefs
+	marks   *Marks
 	cliPath string
 
 	addr string       // host:port once listening
@@ -44,8 +45,8 @@ type event struct {
 }
 
 // New creates a server. cliPath is the executable agents should run.
-func New(ws *workspace.Workspace, store *review.Store, prefs *Prefs, cliPath string) *Server {
-	s := &Server{ws: ws, store: store, prefs: prefs, cliPath: cliPath, clients: map[chan event]struct{}{}}
+func New(ws *workspace.Workspace, store *review.Store, prefs *Prefs, marks *Marks, cliPath string) *Server {
+	s := &Server{ws: ws, store: store, prefs: prefs, marks: marks, cliPath: cliPath, clients: map[chan event]struct{}{}}
 	store.Subscribe(func() { s.broadcast(event{name: "state", data: struct{}{}}) })
 	return s
 }
@@ -106,6 +107,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT /ui/overall", s.handle(s.setOverall))
 	mux.HandleFunc("DELETE /ui/review", s.handle(s.clearReview))
 	mux.HandleFunc("PUT /ui/reviewed", s.handle(s.setReviewed))
+	mux.HandleFunc("DELETE /ui/reviewed", s.handle(s.clearReviewed))
 	mux.HandleFunc("PUT /ui/layout", s.handle(s.setLayout))
 	mux.HandleFunc("GET /ui/instructions", s.handle(s.instructions))
 	mux.HandleFunc("GET /ui/events", s.events)
@@ -362,7 +364,7 @@ func (s *Server) files(*http.Request) (int, any, error) {
 	if err != nil {
 		return 0, nil, err
 	}
-	return http.StatusOK, map[string]any{"files": files, "reviewed": s.prefs.Reviewed()}, nil
+	return http.StatusOK, map[string]any{"files": files, "reviewed": s.marks.All()}, nil
 }
 
 func (s *Server) view(r *http.Request) (int, any, error) {
@@ -370,11 +372,35 @@ func (s *Server) view(r *http.Request) (int, any, error) {
 	if err := review.ValidatePath(p); err != nil {
 		return 0, nil, err
 	}
+	if r.URL.Query().Get("full") == "" {
+		v, ok, err := s.sinceReview(p)
+		if err != nil {
+			return 0, nil, err
+		}
+		if ok {
+			return http.StatusOK, v, nil
+		}
+	}
 	v, err := s.ws.View(p)
 	if err != nil {
 		return 0, nil, err
 	}
 	return http.StatusOK, v, nil
+}
+
+// sinceReview renders p against its reviewed snapshot if it has one and has
+// changed since.
+func (s *Server) sinceReview(p string) (workspace.View, bool, error) {
+	entry, changed, err := s.ws.Changed(p)
+	if err != nil || !changed {
+		return workspace.View{}, false, err
+	}
+	id, snapshot, marked, err := s.marks.Snapshot(p)
+	if err != nil || !marked || id == entry.Hash {
+		return workspace.View{}, false, err
+	}
+	v, err := s.ws.SinceView(entry, snapshot)
+	return v, err == nil, err
 }
 
 func (s *Server) setOverall(r *http.Request) (int, any, error) {
@@ -388,6 +414,9 @@ func (s *Server) setOverall(r *http.Request) (int, any, error) {
 }
 
 func (s *Server) clearReview(*http.Request) (int, any, error) {
+	if err := s.marks.ClearAll(); err != nil {
+		return 0, nil, err
+	}
 	return http.StatusOK, map[string]any{}, s.store.ClearReview()
 }
 
@@ -402,7 +431,29 @@ func (s *Server) setReviewed(r *http.Request) (int, any, error) {
 	if err := review.ValidatePath(input.Path); err != nil {
 		return 0, nil, err
 	}
-	return http.StatusOK, map[string]any{}, s.prefs.SetReviewed(input.Path, input.Hash)
+	if input.Hash == "" {
+		return http.StatusOK, map[string]any{}, s.marks.Clear(input.Path)
+	}
+	entry, changed, err := s.ws.Changed(input.Path)
+	if err != nil {
+		return 0, nil, err
+	}
+	if !changed {
+		return 0, nil, badRequest(fmt.Errorf("%s is not part of this diff", input.Path))
+	}
+	// The snapshot must be what the reviewer saw, not what is there by now.
+	if entry.Hash != input.Hash {
+		return 0, nil, httpError{http.StatusConflict, fmt.Errorf("%s changed while marking it reviewed; look at it again", input.Path)}
+	}
+	content, err := s.ws.NewContent(entry)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, map[string]any{}, s.marks.Set(input.Path, entry.Hash, content)
+}
+
+func (s *Server) clearReviewed(*http.Request) (int, any, error) {
+	return http.StatusOK, map[string]any{}, s.marks.ClearAll()
 }
 
 func (s *Server) setLayout(r *http.Request) (int, any, error) {

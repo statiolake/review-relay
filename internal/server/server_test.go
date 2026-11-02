@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -33,7 +34,11 @@ func newTestServer(t *testing.T) (*httptest.Server, string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := New(ws, store, prefs, "/path/to/review-relay")
+	marks, err := OpenMarks(filepath.Join(data, "reviews", "test"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New(ws, store, prefs, marks, "/path/to/review-relay")
 	ts := httptest.NewUnstartedServer(nil)
 	ts.Start()
 	s.SetAddr(ts.Listener.Addr().String())
@@ -186,12 +191,8 @@ func TestNavigateReachesConnectedPage(t *testing.T) {
 
 func TestReviewedAndViews(t *testing.T) {
 	ts, _ := newTestServer(t)
-	if code, _ := do(t, ts, "PUT", "/ui/reviewed", `{"path":"a.txt","hash":"abc"}`, nil); code != 200 {
-		t.Fatal(code)
-	}
-	_, out := do(t, ts, "GET", "/ui/files", "", nil)
-	if out["reviewed"].(map[string]any)["a.txt"] != "abc" {
-		t.Fatalf("files %v", out)
+	if code, _ := do(t, ts, "PUT", "/ui/reviewed", `{"path":"a.txt","hash":"abc"}`, nil); code != 400 {
+		t.Fatalf("marking outside a diff: %d", code)
 	}
 	code, out := do(t, ts, "GET", "/ui/view?path=a.txt", "", nil)
 	if code != 200 || len(out["lines"].([]any)) != 3 {
@@ -212,5 +213,114 @@ func TestReviewedAndViews(t *testing.T) {
 			t.Fatalf("GET %s: %v %v", asset, resp, err)
 		}
 		resp.Body.Close()
+	}
+}
+
+func TestChangesSinceReview(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", root, "-c", "user.name=test", "-c", "user.email=test@example.com", "-c", "commit.gpgsign=false"}, args...)...)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "main")
+	write("one\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "init")
+	write("one\ntwo\n")
+
+	ws, err := workspace.Open(root, []string{"HEAD"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := t.TempDir()
+	store, _ := review.Open(filepath.Join(data, "state.json"))
+	prefs, _ := OpenPrefs(filepath.Join(data, "viewer.json"))
+	marksDir := filepath.Join(data, "reviews", "test")
+	marks, err := OpenMarks(marksDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(nil)
+	ts.Start()
+	defer ts.Close()
+	s := New(ws, store, prefs, marks, "/path/to/review-relay")
+	s.SetAddr(ts.Listener.Addr().String())
+	ts.Config.Handler = s.Handler()
+
+	hash := func() string {
+		_, out := do(t, ts, "GET", "/ui/files", "", nil)
+		return out["files"].([]any)[0].(map[string]any)["hash"].(string)
+	}
+	kinds := func(query string) (string, bool) {
+		t.Helper()
+		code, out := do(t, ts, "GET", "/ui/view?path=a.txt"+query, "", nil)
+		if code != 200 {
+			t.Fatalf("view: %d %v", code, out)
+		}
+		k := ""
+		for _, l := range out["lines"].([]any) {
+			k += l.(map[string]any)["k"].(string)
+		}
+		return k, out["sinceReview"] == true
+	}
+	mark := func(h string) int {
+		code, _ := do(t, ts, "PUT", "/ui/reviewed", `{"path":"a.txt","hash":"`+h+`"}`, nil)
+		return code
+	}
+
+	if k, since := kinds(""); k != " +" || since {
+		t.Fatalf("before review: %q %v", k, since)
+	}
+	if code := mark("stale"); code != 409 {
+		t.Fatalf("stale mark: %d", code)
+	}
+	reviewed := hash()
+	if code := mark(reviewed); code != 200 {
+		t.Fatalf("mark: %d", code)
+	}
+	if k, since := kinds(""); k != " +" || since {
+		t.Fatalf("reviewed and unchanged: %q %v", k, since)
+	}
+
+	write("one\ntwo\nthree\n")
+	if k, since := kinds(""); k != "  +" || !since {
+		t.Fatalf("since review: %q %v", k, since)
+	}
+	if k, since := kinds("&full=1"); k != " ++" || since {
+		t.Fatalf("full: %q %v", k, since)
+	}
+
+	// The same content coming back restores the mark, and marks survive a reopen.
+	write("one\ntwo\n")
+	if hash() != reviewed {
+		t.Fatal("same content, different id")
+	}
+	reopened, err := OpenMarks(marksDir)
+	if err != nil || reopened.All()["a.txt"] != reviewed {
+		t.Fatalf("reopened %v %v", reopened.All(), err)
+	}
+
+	if code, _ := do(t, ts, "DELETE", "/ui/reviewed", "", nil); code != 200 {
+		t.Fatal(code)
+	}
+	if _, err := os.Stat(marksDir); !os.IsNotExist(err) {
+		t.Fatalf("snapshots left behind: %v", err)
+	}
+}
+
+func TestCorruptMarksAreReported(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "marks.json"), []byte("{"), 0o600)
+	if _, err := OpenMarks(dir); err == nil || !strings.Contains(err.Error(), "corrupted") {
+		t.Fatalf("OpenMarks = %v", err)
 	}
 }

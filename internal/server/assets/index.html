@@ -31,6 +31,7 @@
       <span id="file-status" class="chip"></span>
       <span id="file-stat"></span>
       <span class="spacer"></span>
+      <button id="since-toggle" class="square" data-icon="since" title="Changes since review / whole diff (t)" hidden></button>
       <div id="change-nav" class="segmented" hidden>
         <button id="prev-change" class="square" data-icon="up" title="Previous change ([)"></button>
         <button id="next-change" class="square" data-icon="down" title="Next change (])"></button>
@@ -96,6 +97,8 @@
       <dt><kbd>s</kbd></dt><dd>Resolve the current line's thread (done; hidden from Waiting / Answered), or reopen a resolved one</dd>
       <dt><kbd>zo</kbd> <kbd>zc</kbd> <kbd>zR</kbd> <kbd>zm</kbd></dt><dd>Show / hide the thread on the current line (a resolved thread expands first); show / hide all. On folded lines, <kbd>zo</kbd> or <kbd>Enter</kbd> unfolds</dd>
       <dt><kbd>Space</kbd></dt><dd>Toggle reviewed for the file</dd>
+      <dt><kbd>v</kbd></dt><dd>Mark reviewed and open the next file to review</dd>
+      <dt><kbd>t</kbd></dt><dd>On a file changed since review: those changes / the whole diff</dd>
       <dt><kbd>/</kbd> <kbd data-command="F"></kbd></dt><dd>Find in file; <kbd>Enter</kbd> accepts, then <kbd>n</kbd> / <kbd>p</kbd> step</dd>
       <dt><kbd data-command="E"></kbd></dt><dd>Go to file</dd>
       <dt><kbd data-command="Enter"></kbd> <kbd>Esc</kbd></dt><dd>Submit / cancel</dd>

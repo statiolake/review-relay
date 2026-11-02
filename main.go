@@ -14,6 +14,7 @@ import (
 
 	"github.com/statiolake/review-relay/internal/app"
 	"github.com/statiolake/review-relay/internal/cli"
+	"github.com/statiolake/review-relay/internal/workspace"
 )
 
 const usage = `Usage:
@@ -22,6 +23,9 @@ const usage = `Usage:
 
   Options:
     --devtools    enable the web inspector
+    --branch      view everything this branch changes, uncommitted work included:
+                  git diff --merge-base with the default branch of upstream or
+                  origin, else local main or master
     --wait        return only once the review's window has closed (macOS; the
                   window always blocks elsewhere)
     --no-window   do not open a window; print the viewer URL to open in a browser
@@ -73,6 +77,16 @@ func run(args []string) error {
 		if args[0] == "--" {
 			diffArgs = args[1:]
 		}
+	}
+	if opts["--branch"] {
+		if len(args) > 0 {
+			return errors.New("--branch takes no diff arguments; use --merge-base BASE to name the base")
+		}
+		base, err := workspace.DetectBaseBranch(".")
+		if err != nil {
+			return err
+		}
+		diffArgs = []string{"--merge-base", base}
 	}
 	if opts["--no-window"] {
 		return serve(diffArgs)
