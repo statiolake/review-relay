@@ -104,8 +104,11 @@ func run(args []string) error {
 // runAttach is `review-relay attach [--workspace PATH] [-- DIFF-ARGS]`.
 func runAttach(args []string) error {
 	dir := ""
+	var opts attach.Options
 	for len(args) > 0 && args[0] != "--" {
 		switch {
+		case args[0] == "--no-start":
+			opts.NoStart, args = true, args[1:]
 		case args[0] == "--workspace" && len(args) > 1:
 			dir, args = args[1], args[2:]
 		case strings.HasPrefix(args[0], "--workspace="):
@@ -114,9 +117,8 @@ func runAttach(args []string) error {
 			return fmt.Errorf("attach: unexpected argument %q\n\n%s", args[0], attach.Usage)
 		}
 	}
-	var diffArgs []string // nil: the files
-	if len(args) > 0 {
-		diffArgs = append([]string{}, args[1:]...)
+	if len(args) > 0 { // nil: the files
+		opts.DiffArgs = append([]string{}, args[1:]...)
 	}
 	if dir == "" {
 		var err error
@@ -124,7 +126,7 @@ func runAttach(args []string) error {
 			return err
 		}
 	}
-	return attach.Run(dir, diffArgs, os.Stdin, os.Stdout)
+	return attach.Run(dir, opts, os.Stdin, os.Stdout)
 }
 
 // isAgentCommand reports whether args, after the agent's global flags, start

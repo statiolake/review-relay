@@ -126,7 +126,7 @@ The HTTP API (`/health`, `/v1/comments`, `/v1/comments/:id/replies`, `/v1/commen
 
 review-relay is the one core of a review: its server keeps the threads, validates every change, stores them and tells every client. The viewer page, agents (through the CLI) and editor frontends are all clients of the same API under `/v1/`. The [Review Relay](https://github.com/statiolake/vscode-review-relay) extension for VS Code and its Neovim plugin (the same repository) are such frontends: they show a workspace's review in the editor and hold no review logic of their own.
 
-A frontend runs `review-relay attach [--workspace PATH] [-- DIFF-ARGS]` as a child and speaks JSON lines with it:
+A frontend runs `review-relay attach [--workspace PATH] [--no-start] [-- DIFF-ARGS]` as a child and speaks JSON lines with it:
 
 ```text
 stdin   {"id":1,"method":"GET","path":"/v1/comments"}
@@ -136,7 +136,7 @@ stdout  {"type":"attached","endpoint":"http://127.0.0.1:…","root":"/repo","own
         {"type":"event","name":"navigate","data":{…}}      (an agent's `navigate`)
 ```
 
-`attach` uses the review already running for the workspace (a window, `--no-window`, another editor) or runs one in its own process, without a window, until its stdin closes. When the review it uses goes away, it reaches the next one (or starts it) and says `attached` again, so every frontend keeps working when the one that ran the server quits. Comments are stored as always, so nothing is lost on the way. What `attach` carries is the same HTTP API: besides the agent endpoints above, `GET /v1/session`, `GET /v1/files`, `GET /v1/view`, `PUT|DELETE /v1/reviewed`, `PUT /v1/overall`, `DELETE /v1/review`, `PUT /v1/layout`, `GET /v1/instructions`, `GET /v1/events` (server-sent events), `PATCH /v1/comments/:id` (edit a body), `PUT /v1/comments/:id/location` (an editor moved the thread's lines; adds nothing, reopens nothing) and `POST /v1/import` (comments exported from another store, ids kept; known ids are skipped).
+`attach` uses the review already running for the workspace (a window, `--no-window`, another editor) or runs one in its own process, without a window, until its stdin closes (`--no-start`: only one already running, and it ends with it). When the review it uses goes away, it reaches the next one (or starts it) and says `attached` again, so every frontend keeps working when the one that ran the server quits. Comments are stored as always, so nothing is lost on the way. What `attach` carries is the same HTTP API: besides the agent endpoints above, `GET /v1/session`, `GET /v1/files`, `GET /v1/view`, `PUT|DELETE /v1/reviewed`, `PUT /v1/overall`, `DELETE /v1/review`, `PUT /v1/layout`, `GET /v1/instructions`, `GET /v1/events` (server-sent events), `PATCH /v1/comments/:id` (edit a body), `PUT /v1/comments/:id/location` (an editor moved the thread's lines; adds nothing, reopens nothing) and `POST /v1/import` (comments exported from another store, ids kept; known ids are skipped).
 
 Built with `CGO_ENABLED=0`, review-relay has no window but everything else (`--no-window`, `attach`, the CLI); the editor frontends ship that build, which cross-compiles anywhere.
 

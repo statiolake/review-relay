@@ -76,15 +76,24 @@ type Message struct {
 }
 
 // Usage describes the command.
-const Usage = `review-relay attach [--workspace PATH] [-- DIFF-ARGS]
+const Usage = `review-relay attach [--workspace PATH] [--no-start] [-- DIFF-ARGS]
   For editor frontends: JSON lines on stdin/stdout carrying the API of the
   review of PATH (default: the current directory), started without a window
-  when none runs (for DIFF-ARGS, as review-relay DIFF-ARGS would).`
+  when none runs (for DIFF-ARGS, as review-relay DIFF-ARGS would).
+  --no-start only uses a review already running, and ends with it.`
+
+// Options are attach's flags.
+type Options struct {
+	// DiffArgs (nil: the files) are used only for a review it starts.
+	DiffArgs []string
+	// NoStart only uses a review already running: none is an error, and
+	// so is its going away.
+	NoStart bool
+}
 
 // Run attaches to the review of dir until in ends or a signal arrives.
-// diffArgs (nil: the files) are used only for a review it starts.
-func Run(dir string, diffArgs []string, in io.Reader, out io.Writer) error {
-	a := &attacher{dir: dir, diffArgs: diffArgs, enc: json.NewEncoder(out),
+func Run(dir string, opts Options, in io.Reader, out io.Writer) error {
+	a := &attacher{dir: dir, diffArgs: opts.DiffArgs, noStart: opts.NoStart, enc: json.NewEncoder(out),
 		api: &http.Client{Timeout: 30 * time.Second}}
 	defer a.detach()
 	if err := a.connect(); err != nil {
@@ -136,6 +145,7 @@ func read(in io.Reader, requests chan<- Request) error {
 type attacher struct {
 	dir      string
 	diffArgs []string
+	noStart  bool
 	api      *http.Client
 
 	wmu sync.Mutex
@@ -165,6 +175,9 @@ func (a *attacher) lostCh() <-chan struct{} {
 func (a *attacher) connect() error {
 	endpoint, root, findErr := session.Find(a.dir)
 	var own *app.Review
+	if findErr != nil && a.noStart {
+		return findErr
+	}
 	if findErr != nil {
 		ws, _, err := app.Resolve(a.dir, a.diffArgs, nil)
 		if err != nil {
@@ -212,7 +225,11 @@ func (a *attacher) connect() error {
 func (a *attacher) reconnect() error {
 	a.detach()
 	var err error
-	for try := 0; try < 25; try++ {
+	tries := 25
+	if a.noStart {
+		tries = 3 // the next review may be coming up; none is not ours to start
+	}
+	for try := 0; try < tries; try++ {
 		// Spread out the frontends that lost the same server, so one
 		// starts the next and the others find it.
 		time.Sleep(time.Duration(100+rand.IntN(300)) * time.Millisecond)

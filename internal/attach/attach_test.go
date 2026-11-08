@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,7 +25,7 @@ func start(t *testing.T, dir string) *peer {
 	outR, outW := io.Pipe()
 	p := &peer{in: inW, out: make(chan Message, 64), done: make(chan error, 1)}
 	go func() {
-		err := Run(dir, nil, inR, outW)
+		err := Run(dir, Options{}, inR, outW)
 		outW.Close()
 		p.done <- err
 	}()
@@ -118,5 +119,18 @@ func TestAttachStartsSharesAndTakesOverTheReview(t *testing.T) {
 	json.Unmarshal(r.Body, &state)
 	if r.Status != 200 || len(state.Comments) != 1 || state.Comments[0].Body != "why?" {
 		t.Fatalf("the review did not survive the takeover: %d %s", r.Status, r.Body)
+	}
+}
+
+func TestNoStartOnlyUsesARunningReview(t *testing.T) {
+	session.Dir = t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	dir := t.TempDir()
+	var out strings.Builder
+	if err := Run(dir, Options{NoStart: true}, strings.NewReader(""), &out); err == nil {
+		t.Fatal("attached with no review running")
+	}
+	if !strings.Contains(out.String(), `"type":"error"`) {
+		t.Fatalf("no error line: %q", out.String())
 	}
 }
