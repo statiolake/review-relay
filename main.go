@@ -13,7 +13,6 @@ import (
 	"syscall"
 
 	"github.com/statiolake/review-relay/internal/app"
-	"github.com/statiolake/review-relay/internal/attach"
 	"github.com/statiolake/review-relay/internal/cli"
 	"github.com/statiolake/review-relay/internal/workspace"
 )
@@ -40,10 +39,7 @@ const usage = `Usage:
     review-relay main...HEAD    changes on this branch
     review-relay --             unstaged changes (plain "git diff")
 
-` + cli.Usage + `
-
-Editor frontends:
-  ` + attach.Usage
+` + cli.Usage
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -59,9 +55,6 @@ func run(args []string) error {
 	}
 	if len(args) == 1 && args[0] == app.ResidentFlag {
 		return runResident()
-	}
-	if len(args) > 0 && args[0] == "attach" {
-		return runAttach(args[1:])
 	}
 	if isAgentCommand(args) {
 		return cli.Run(args, os.Stdout)
@@ -99,34 +92,6 @@ func run(args []string) error {
 		return serve(diffArgs)
 	}
 	return openWindow(opts["--devtools"], opts["--wait"], diffArgs)
-}
-
-// runAttach is `review-relay attach [--workspace PATH] [-- DIFF-ARGS]`.
-func runAttach(args []string) error {
-	dir := ""
-	var opts attach.Options
-	for len(args) > 0 && args[0] != "--" {
-		switch {
-		case args[0] == "--no-start":
-			opts.NoStart, args = true, args[1:]
-		case args[0] == "--workspace" && len(args) > 1:
-			dir, args = args[1], args[2:]
-		case strings.HasPrefix(args[0], "--workspace="):
-			dir, args = strings.TrimPrefix(args[0], "--workspace="), args[1:]
-		default:
-			return fmt.Errorf("attach: unexpected argument %q\n\n%s", args[0], attach.Usage)
-		}
-	}
-	if len(args) > 0 { // nil: the files
-		opts.DiffArgs = append([]string{}, args[1:]...)
-	}
-	if dir == "" {
-		var err error
-		if dir, err = os.Getwd(); err != nil {
-			return err
-		}
-	}
-	return attach.Run(dir, opts, os.Stdin, os.Stdout)
 }
 
 // isAgentCommand reports whether args, after the agent's global flags, start

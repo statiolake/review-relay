@@ -1,8 +1,7 @@
 // Package server is the review's loopback HTTP server. It serves the page
-// and one API under /v1/ for every client: agents (through the CLI), the
-// viewer page, and the editor frontends (VS Code, Neovim) that attach to it
-// (see internal/attach). The page is a client like the others; nothing
-// under /v1/ is only for it.
+// and one API under /v1/ for both its clients, the viewer page and agents
+// (through the CLI). The page is a client like the agents; nothing under
+// /v1/ is only for it.
 package server
 
 import (
@@ -102,8 +101,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/comments/{id}", s.handle(s.updateComment))
 	mux.HandleFunc("PUT /v1/comments/{id}/resolved", s.handle(s.resolveComment))
 	mux.HandleFunc("DELETE /v1/comments/{id}", s.handle(s.removeComment))
-	mux.HandleFunc("PUT /v1/comments/{id}/location", s.handle(s.moveComment))
-	mux.HandleFunc("POST /v1/import", s.handle(s.importComments))
 	mux.HandleFunc("POST /v1/navigate", s.handle(s.navigate))
 
 	mux.HandleFunc("GET /v1/session", s.handle(s.session))
@@ -288,36 +285,6 @@ func (s *Server) resolveComment(r *http.Request) (int, any, error) {
 		return 0, nil, err
 	}
 	return http.StatusOK, map[string]any{"comment": root}, nil
-}
-
-// moveComment puts a thread at a new location without replying: an
-// editor reports where its lines went after an edit.
-func (s *Server) moveComment(r *http.Request) (int, any, error) {
-	var input review.Location
-	if err := readJSON(r, &input); err != nil {
-		return 0, nil, err
-	}
-	root, err := s.store.Move(r.PathValue("id"), input)
-	if err != nil {
-		return 0, nil, err
-	}
-	return http.StatusOK, map[string]any{"comment": root}, nil
-}
-
-// importComments adds comments exported from another store (an editor's
-// own, from before it used this server), keeping their ids.
-func (s *Server) importComments(r *http.Request) (int, any, error) {
-	var input struct {
-		Comments []review.Comment `json:"comments"`
-	}
-	if err := readJSON(r, &input); err != nil {
-		return 0, nil, err
-	}
-	added, err := s.store.Import(input.Comments)
-	if err != nil {
-		return 0, nil, err
-	}
-	return http.StatusOK, map[string]any{"imported": added}, nil
 }
 
 func (s *Server) removeComment(r *http.Request) (int, any, error) {

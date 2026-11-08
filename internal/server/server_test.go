@@ -324,29 +324,3 @@ func TestCorruptMarksAreReported(t *testing.T) {
 		t.Fatalf("OpenMarks = %v", err)
 	}
 }
-
-func TestMoveAndImport(t *testing.T) {
-	ts, _ := newTestServer(t)
-	_, out := do(t, ts, "POST", "/v1/comments", `{"path":"a.txt","line":0,"body":"hi","source":"human"}`, nil)
-	id := out["comment"].(map[string]any)["id"].(string)
-	code, out := do(t, ts, "PUT", "/v1/comments/"+id+"/location", `{"path":"a.txt","line":1,"endLine":2}`, nil)
-	if moved := out["comment"].(map[string]any); code != 200 || moved["line"] != 1.0 || moved["endLine"] != 2.0 {
-		t.Fatalf("move: %d %v", code, out)
-	}
-	_, list := do(t, ts, "GET", "/v1/comments", "", nil)
-	if n := len(list["comments"].([]any)); n != 1 {
-		t.Fatalf("move added a comment: %d", n)
-	}
-
-	imported := `{"comments":[{"id":"11111111-1111-4111-8111-111111111111","path":"a.txt","line":0,"endLine":0,
-		"body":"old","author":"Human","source":"human","createdAt":"2026-01-02T03:04:05Z","resolved":true}]}`
-	if code, out := do(t, ts, "POST", "/v1/import", imported, nil); code != 200 || out["imported"] != 1.0 {
-		t.Fatalf("import: %d %v", code, out)
-	}
-	if code, out := do(t, ts, "POST", "/v1/import", imported, nil); code != 200 || out["imported"] != 0.0 {
-		t.Fatalf("import again: %d %v", code, out)
-	}
-	if code, _ := do(t, ts, "POST", "/v1/import", `{"comments":[{"id":"x"}]}`, nil); code != 400 {
-		t.Fatalf("a malformed import: %d", code)
-	}
-}
