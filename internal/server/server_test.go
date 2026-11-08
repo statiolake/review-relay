@@ -111,7 +111,7 @@ func TestCommentLifecycleAndErrors(t *testing.T) {
 		{"DELETE", "/v1/comments/nope", "", 400},
 		{"POST", "/v1/navigate", `{"path":"a.txt","line":9}`, 400},
 		{"POST", "/v1/navigate", `{"path":"a.txt","line":0}`, 503}, // no window connected
-		{"PUT", "/ui/layout", `{"layout":"diagonal"}`, 400},
+		{"PUT", "/v1/layout", `{"layout":"diagonal"}`, 400},
 	}
 	for _, c := range cases {
 		if code, out := do(t, ts, c.method, c.path, c.body, nil); code != c.want {
@@ -159,7 +159,7 @@ func TestCommentLifecycleAndErrors(t *testing.T) {
 
 func TestNavigateReachesConnectedPage(t *testing.T) {
 	ts, _ := newTestServer(t)
-	resp, err := http.Get(ts.URL + "/ui/events")
+	resp, err := http.Get(ts.URL + "/v1/events")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,14 +191,14 @@ func TestNavigateReachesConnectedPage(t *testing.T) {
 
 func TestReviewedAndViews(t *testing.T) {
 	ts, _ := newTestServer(t)
-	if code, _ := do(t, ts, "PUT", "/ui/reviewed", `{"path":"a.txt","hash":"abc"}`, nil); code != 400 {
+	if code, _ := do(t, ts, "PUT", "/v1/reviewed", `{"path":"a.txt","hash":"abc"}`, nil); code != 400 {
 		t.Fatalf("marking outside a diff: %d", code)
 	}
-	code, out := do(t, ts, "GET", "/ui/view?path=a.txt", "", nil)
+	code, out := do(t, ts, "GET", "/v1/view?path=a.txt", "", nil)
 	if code != 200 || len(out["lines"].([]any)) != 3 {
 		t.Fatalf("view %d %v", code, out)
 	}
-	if code, _ := do(t, ts, "GET", "/ui/view?path=../../etc/passwd", "", nil); code != 400 {
+	if code, _ := do(t, ts, "GET", "/v1/view?path=../../etc/passwd", "", nil); code != 400 {
 		t.Fatalf("escape: %d", code)
 	}
 	resp, _ := http.Get(ts.URL + "/")
@@ -257,12 +257,12 @@ func TestChangesSinceReview(t *testing.T) {
 	ts.Config.Handler = s.Handler()
 
 	hash := func() string {
-		_, out := do(t, ts, "GET", "/ui/files", "", nil)
+		_, out := do(t, ts, "GET", "/v1/files", "", nil)
 		return out["files"].([]any)[0].(map[string]any)["hash"].(string)
 	}
 	kinds := func(query string) (string, bool) {
 		t.Helper()
-		code, out := do(t, ts, "GET", "/ui/view?path=a.txt"+query, "", nil)
+		code, out := do(t, ts, "GET", "/v1/view?path=a.txt"+query, "", nil)
 		if code != 200 {
 			t.Fatalf("view: %d %v", code, out)
 		}
@@ -273,7 +273,7 @@ func TestChangesSinceReview(t *testing.T) {
 		return k, out["sinceReview"] == true
 	}
 	mark := func(h string) int {
-		code, _ := do(t, ts, "PUT", "/ui/reviewed", `{"path":"a.txt","hash":"`+h+`"}`, nil)
+		code, _ := do(t, ts, "PUT", "/v1/reviewed", `{"path":"a.txt","hash":"`+h+`"}`, nil)
 		return code
 	}
 
@@ -309,7 +309,7 @@ func TestChangesSinceReview(t *testing.T) {
 		t.Fatalf("reopened %v %v", reopened.All(), err)
 	}
 
-	if code, _ := do(t, ts, "DELETE", "/ui/reviewed", "", nil); code != 200 {
+	if code, _ := do(t, ts, "DELETE", "/v1/reviewed", "", nil); code != 200 {
 		t.Fatal(code)
 	}
 	if _, err := os.Stat(marksDir); !os.IsNotExist(err) {
@@ -322,5 +322,31 @@ func TestCorruptMarksAreReported(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "marks.json"), []byte("{"), 0o600)
 	if _, err := OpenMarks(dir); err == nil || !strings.Contains(err.Error(), "corrupted") {
 		t.Fatalf("OpenMarks = %v", err)
+	}
+}
+
+func TestMoveAndImport(t *testing.T) {
+	ts, _ := newTestServer(t)
+	_, out := do(t, ts, "POST", "/v1/comments", `{"path":"a.txt","line":0,"body":"hi","source":"human"}`, nil)
+	id := out["comment"].(map[string]any)["id"].(string)
+	code, out := do(t, ts, "PUT", "/v1/comments/"+id+"/location", `{"path":"a.txt","line":1,"endLine":2}`, nil)
+	if moved := out["comment"].(map[string]any); code != 200 || moved["line"] != 1.0 || moved["endLine"] != 2.0 {
+		t.Fatalf("move: %d %v", code, out)
+	}
+	_, list := do(t, ts, "GET", "/v1/comments", "", nil)
+	if n := len(list["comments"].([]any)); n != 1 {
+		t.Fatalf("move added a comment: %d", n)
+	}
+
+	imported := `{"comments":[{"id":"11111111-1111-4111-8111-111111111111","path":"a.txt","line":0,"endLine":0,
+		"body":"old","author":"Human","source":"human","createdAt":"2026-01-02T03:04:05Z","resolved":true}]}`
+	if code, out := do(t, ts, "POST", "/v1/import", imported, nil); code != 200 || out["imported"] != 1.0 {
+		t.Fatalf("import: %d %v", code, out)
+	}
+	if code, out := do(t, ts, "POST", "/v1/import", imported, nil); code != 200 || out["imported"] != 0.0 {
+		t.Fatalf("import again: %d %v", code, out)
+	}
+	if code, _ := do(t, ts, "POST", "/v1/import", `{"comments":[{"id":"x"}]}`, nil); code != 400 {
+		t.Fatalf("a malformed import: %d", code)
 	}
 }

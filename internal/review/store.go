@@ -125,6 +125,67 @@ func (s *Store) Reply(id string, input CommentInput) (Comment, error) {
 	})
 }
 
+// Move puts the thread containing id at loc, as an editor does when the
+// lines above it change: unlike Reply it adds nothing and reopens nothing.
+// It returns the thread's root.
+func (s *Store) Move(id string, loc Location) (Comment, error) {
+	if err := ValidateID(id); err != nil {
+		return Comment{}, err
+	}
+	line, end, err := loc.Normalize()
+	if err != nil {
+		return Comment{}, err
+	}
+	var root Comment
+	return root, s.mutate(func(state *State) error {
+		i := slices.IndexFunc(state.Comments, func(x Comment) bool { return x.ID == id })
+		if i < 0 {
+			return ErrNotFound
+		}
+		rootID := state.Comments[i].ID
+		if parent := state.Comments[i].ParentID; parent != "" {
+			rootID = parent
+		}
+		for j := range state.Comments {
+			if x := &state.Comments[j]; x.ID == rootID || x.ParentID == rootID {
+				x.Path, x.Line, x.EndLine = loc.Path, line, end
+				if x.ID == rootID {
+					root = *x
+				}
+			}
+		}
+		return nil
+	})
+}
+
+// Import adds comments written elsewhere (another store's export), keeping
+// their ids, authors and times. A comment whose id is already here is
+// skipped, so importing the same export twice adds nothing. The result
+// must be a valid state, or nothing is imported. It returns how many were
+// added.
+func (s *Store) Import(comments []Comment) (int, error) {
+	var added int
+	err := s.mutate(func(state *State) error {
+		known := map[string]bool{}
+		for _, c := range state.Comments {
+			known[c.ID] = true
+		}
+		for _, c := range comments {
+			if known[c.ID] {
+				continue
+			}
+			known[c.ID] = true
+			state.Comments = append(state.Comments, c)
+			added++
+		}
+		if err := state.Validate(); err != nil {
+			return err
+		}
+		return nil
+	})
+	return added, err
+}
+
 // SetResolved resolves or reopens the thread containing id and returns the
 // thread's root.
 func (s *Store) SetResolved(id string, resolved bool) (Comment, error) {

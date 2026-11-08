@@ -167,3 +167,45 @@ func TestOpenResolvedState(t *testing.T) {
 		t.Fatalf("resolved reply accepted: %v", err)
 	}
 }
+
+func TestMoveKeepsTheThreadAsItIs(t *testing.T) {
+	s, _ := openTemp(t)
+	root, _ := s.Add(CommentInput{Location: Location{Path: "a.go", Line: 1}, Body: "r"})
+	reply, _ := s.Reply(root.ID, CommentInput{Location: Location{Path: "a.go", Line: 1}, Body: "1"})
+	s.SetResolved(root.ID, true)
+	moved, err := s.Move(reply.ID, Location{Path: "a.go", Line: 4, EndLine: intp(6)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.ID != root.ID || !moved.Resolved || moved.Line != 4 || moved.EndLine != 6 {
+		t.Fatalf("unexpected root after move %+v", moved)
+	}
+	if n := len(s.Snapshot().Comments); n != 2 {
+		t.Fatalf("move added comments: %d", n)
+	}
+	if _, err := s.Move(newUUID(), Location{Path: "a.go", Line: 0}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("move of a missing thread: %v", err)
+	}
+}
+
+func TestImportKeepsIdsAndSkipsKnownOnes(t *testing.T) {
+	s, _ := openTemp(t)
+	other, _ := openTemp(t)
+	root, _ := other.Add(CommentInput{Location: Location{Path: "a.go", Line: 1}, Body: "r", Source: SourceHuman})
+	other.Reply(root.ID, CommentInput{Location: Location{Path: "a.go", Line: 1}, Body: "1"})
+	export := other.Snapshot().Comments
+	if n, err := s.Import(export); err != nil || n != 2 {
+		t.Fatalf("import: %d %v", n, err)
+	}
+	if n, err := s.Import(export); err != nil || n != 0 {
+		t.Fatalf("second import: %d %v", n, err)
+	}
+	if got, _ := s.Find(root.ID); got.Author != "Human" {
+		t.Fatalf("imported root %+v", got)
+	}
+	orphan := export[1]
+	orphan.ID, orphan.ParentID = newUUID(), newUUID()
+	if _, err := s.Import([]Comment{orphan}); err == nil {
+		t.Fatal("an orphan reply was imported")
+	}
+}

@@ -1,5 +1,8 @@
-// Package server is the viewer's loopback HTTP server. It serves the page,
-// the page's own endpoints under /ui/, and the agent API under /v1/.
+// Package server is the review's loopback HTTP server. It serves the page
+// and one API under /v1/ for every client: agents (through the CLI), the
+// viewer page, and the editor frontends (VS Code, Neovim) that attach to it
+// (see internal/attach). The page is a client like the others; nothing
+// under /v1/ is only for it.
 package server
 
 import (
@@ -99,18 +102,20 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PATCH /v1/comments/{id}", s.handle(s.updateComment))
 	mux.HandleFunc("PUT /v1/comments/{id}/resolved", s.handle(s.resolveComment))
 	mux.HandleFunc("DELETE /v1/comments/{id}", s.handle(s.removeComment))
+	mux.HandleFunc("PUT /v1/comments/{id}/location", s.handle(s.moveComment))
+	mux.HandleFunc("POST /v1/import", s.handle(s.importComments))
 	mux.HandleFunc("POST /v1/navigate", s.handle(s.navigate))
 
-	mux.HandleFunc("GET /ui/session", s.handle(s.session))
-	mux.HandleFunc("GET /ui/files", s.handle(s.files))
-	mux.HandleFunc("GET /ui/view", s.handle(s.view))
-	mux.HandleFunc("PUT /ui/overall", s.handle(s.setOverall))
-	mux.HandleFunc("DELETE /ui/review", s.handle(s.clearReview))
-	mux.HandleFunc("PUT /ui/reviewed", s.handle(s.setReviewed))
-	mux.HandleFunc("DELETE /ui/reviewed", s.handle(s.clearReviewed))
-	mux.HandleFunc("PUT /ui/layout", s.handle(s.setLayout))
-	mux.HandleFunc("GET /ui/instructions", s.handle(s.instructions))
-	mux.HandleFunc("GET /ui/events", s.events)
+	mux.HandleFunc("GET /v1/session", s.handle(s.session))
+	mux.HandleFunc("GET /v1/files", s.handle(s.files))
+	mux.HandleFunc("GET /v1/view", s.handle(s.view))
+	mux.HandleFunc("PUT /v1/overall", s.handle(s.setOverall))
+	mux.HandleFunc("DELETE /v1/review", s.handle(s.marksChange(s.clearReview)))
+	mux.HandleFunc("PUT /v1/reviewed", s.handle(s.marksChange(s.setReviewed)))
+	mux.HandleFunc("DELETE /v1/reviewed", s.handle(s.marksChange(s.clearReviewed)))
+	mux.HandleFunc("PUT /v1/layout", s.handle(s.setLayout))
+	mux.HandleFunc("GET /v1/instructions", s.handle(s.instructions))
+	mux.HandleFunc("GET /v1/events", s.events)
 	return s.guard(mux)
 }
 
@@ -285,6 +290,36 @@ func (s *Server) resolveComment(r *http.Request) (int, any, error) {
 	return http.StatusOK, map[string]any{"comment": root}, nil
 }
 
+// moveComment puts a thread at a new location without replying: an
+// editor reports where its lines went after an edit.
+func (s *Server) moveComment(r *http.Request) (int, any, error) {
+	var input review.Location
+	if err := readJSON(r, &input); err != nil {
+		return 0, nil, err
+	}
+	root, err := s.store.Move(r.PathValue("id"), input)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, map[string]any{"comment": root}, nil
+}
+
+// importComments adds comments exported from another store (an editor's
+// own, from before it used this server), keeping their ids.
+func (s *Server) importComments(r *http.Request) (int, any, error) {
+	var input struct {
+		Comments []review.Comment `json:"comments"`
+	}
+	if err := readJSON(r, &input); err != nil {
+		return 0, nil, err
+	}
+	added, err := s.store.Import(input.Comments)
+	if err != nil {
+		return 0, nil, err
+	}
+	return http.StatusOK, map[string]any{"imported": added}, nil
+}
+
 func (s *Server) removeComment(r *http.Request) (int, any, error) {
 	remaining, err := s.store.Remove(r.PathValue("id"))
 	if err != nil {
@@ -450,6 +485,18 @@ func (s *Server) setReviewed(r *http.Request) (int, any, error) {
 		return 0, nil, err
 	}
 	return http.StatusOK, map[string]any{}, s.marks.Set(input.Path, entry.Hash, content)
+}
+
+// marksChange announces a change of the reviewed marks once fn made it, as
+// the store announces its own: every client then reads the files again.
+func (s *Server) marksChange(fn func(*http.Request) (int, any, error)) func(*http.Request) (int, any, error) {
+	return func(r *http.Request) (int, any, error) {
+		status, value, err := fn(r)
+		if err == nil {
+			s.broadcast(event{name: "state", data: struct{}{}})
+		}
+		return status, value, err
+	}
 }
 
 func (s *Server) clearReviewed(*http.Request) (int, any, error) {

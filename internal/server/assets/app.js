@@ -157,7 +157,7 @@ function formatTime(iso) {
 // ---- Loading ----------------------------------------------------------------
 
 async function loadSession() {
-  state.session = await api('GET', '/ui/session');
+  state.session = await api('GET', '/v1/session');
   state.layout = state.session.layout;
   const { root, diff, diffArgs } = state.session;
   document.title = diff ? `${basename(root)} — git diff ${diffArgs.join(' ')}` : basename(root);
@@ -165,7 +165,7 @@ async function loadSession() {
 }
 
 async function refreshFiles() {
-  const data = await api('GET', '/ui/files');
+  const data = await api('GET', '/v1/files');
   const key = JSON.stringify(data);
   if (key === state.filesKey) return;
   state.filesKey = key;
@@ -191,7 +191,7 @@ async function refreshComments() {
 async function refreshView() {
   if (!state.selected) return;
   const path = state.selected;
-  const view = await api('GET', `/ui/view?path=${encodeURIComponent(path)}${state.fullDiff.has(path) ? '&full=1' : ''}`);
+  const view = await api('GET', `/v1/view?path=${encodeURIComponent(path)}${state.fullDiff.has(path) ? '&full=1' : ''}`);
   if (state.selected !== path) return; // another file was opened meanwhile
   state.view = view;
   renderView();
@@ -359,7 +359,7 @@ async function setReviewed(file, checked) {
 
 async function setReviewedMany(files, checked) {
   for (const file of files) {
-    await api('PUT', '/ui/reviewed', { path: file.path, hash: checked ? file.hash : '' });
+    await api('PUT', '/v1/reviewed', { path: file.path, hash: checked ? file.hash : '' });
     if (checked) state.reviewed[file.path] = file.hash;
     else delete state.reviewed[file.path];
     state.fullDiff.delete(file.path);
@@ -650,7 +650,7 @@ for (const button of document.querySelectorAll('#layout-toggle button')) {
     state.layout = button.dataset.layout;
     renderHeader();
     renderView();
-    await api('PUT', '/ui/layout', { layout: state.layout });
+    await api('PUT', '/v1/layout', { layout: state.layout });
   });
 }
 
@@ -1497,7 +1497,7 @@ async function sendOverall() {
   clearTimeout(overallTimer);
   if (overallComposing || overall.value === overallSent) return;
   const value = overall.value;
-  await api('PUT', '/ui/overall', { overall: value });
+  await api('PUT', '/v1/overall', { overall: value });
   overallSent = value;
 }
 function scheduleOverall() {
@@ -1510,7 +1510,7 @@ overall.addEventListener('compositionend', () => { overallComposing = false; sch
 overall.addEventListener('blur', sendOverall);
 
 $('#copy-instructions').addEventListener('click', async () => {
-  const { text } = await api('GET', '/ui/instructions');
+  const { text } = await api('GET', '/v1/instructions');
   await copyText(text, 'Copied agent instructions — paste them into your agent');
 });
 $('#clear-review').addEventListener('click', async () => {
@@ -1519,10 +1519,10 @@ $('#clear-review').addEventListener('click', async () => {
     ...(state.session.diff ? [{ label: 'Clear reviewed marks', value: 'marks' }] : []),
     { label: 'Clear everything', value: 'review', class: 'destructive' },
   ]);
-  if (choice === 'marks') await api('DELETE', '/ui/reviewed');
+  if (choice === 'marks') await api('DELETE', '/v1/reviewed');
   if (choice === 'comments') await api('DELETE', '/v1/comments');
   if (choice === 'review') {
-    await api('DELETE', '/ui/review');
+    await api('DELETE', '/v1/review');
     overall.value = overallSent = '';
   }
   if (choice === 'marks' || choice === 'review') {
@@ -1679,7 +1679,7 @@ document.addEventListener('keydown', event => {
 // ---- Startup ----------------------------------------------------------------
 
 function connectEvents() {
-  const events = new EventSource('/ui/events');
+  const events = new EventSource('/v1/events');
   events.addEventListener('open', () => refreshComments());
   events.addEventListener('state', () => refreshComments());
   events.addEventListener('navigate', event => {
