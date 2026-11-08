@@ -121,8 +121,11 @@ func isLoopback(endpoint string) bool {
 	return err == nil && u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != ""
 }
 
+// healthy reports whether endpoint answers. A viewer that is gone refuses
+// the connection at once; a busy machine can take a while to answer, so the
+// wait is generous rather than tight.
 func healthy(endpoint string) bool {
-	resp, err := (&http.Client{Timeout: 500 * time.Millisecond}).Get(strings.TrimRight(endpoint, "/") + "/health")
+	resp, err := (&http.Client{Timeout: 3 * time.Second}).Get(strings.TrimRight(endpoint, "/") + "/health")
 	if err != nil {
 		return false
 	}
